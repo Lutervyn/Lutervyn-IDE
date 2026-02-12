@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Icon Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'icons';
+            src: url('icomoon/fonts/icomoon.ttf') format('truetype');
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            background: #2e2e32;
+            color: white;
+        }
+
+        .test-icon {
+            font-family: 'icons';
+            font-size: 64px;
+            display: inline-block;
+            margin: 20px;
+        }
+
+        .test-small {
+            font-size: 24px;
+        }
+
+        .preview {
+            background: #1e1e22;
+            padding: 30px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        h2 {
+            color: #e1e1e6;
+        }
+
+        .char-code {
+            color: #93ddfa;
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Icon Font Preview</h1>
+
+    <div class="preview">
+        <h2>Character '5' (your logo):</h2>
+        <span class="test-icon">5</span>
+        <p class="char-code">Unicode: U+0035 (character '5')</p>
+    </div>
+
+    <div class="preview">
+        <h2>Small size (as it will appear in title bar):</h2>
+        <span class="test-icon test-small">5</span>
+    </div>
+
+    <div class="preview">
+        <h2>All characters (5, 6, 7, 8, 9):</h2>
+        <span class="test-icon">5</span>
+        <span class="test-icon">6</span>
+        <span class="test-icon">7</span>
+        <span class="test-icon">8</span>
+        <span class="test-icon">9</span>
+    </div>
+
+    <div class="preview">
+        <h2>Title bar simulation:</h2>
+        <div style="background: #2e2e32; padding: 10px; font-size: 14px;">
+            <span class="test-icon test-small">5</span>
+            <span style="margin-left: 10px;">Lutervyn IDE</span>
+        </div>
+    </div>
+
+    <p style="margin-top: 40px; color: #93ddfa;">
+        ✓ If you see your logo above, the font is working correctly!<br>
+        ✗ If you see the number "5" instead, the font mapping didn't work.
+    </p>
+</body>
+
+</html>
