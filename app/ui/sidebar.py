@@ -1,11 +1,12 @@
 import os
+import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QTreeView, QLineEdit,
+                              QTreeView, QLineEdit, QFrame, QApplication,
                               QStackedWidget, QPushButton, QTreeWidget,
                               QTreeWidgetItem, QSizePolicy, QAbstractItemView,
                               QFileIconProvider, QInputDialog, QMessageBox, QMenu,
                               QStyledItemDelegate, QStyleOptionViewItem, QListWidget, QStyle)
-from PyQt6.QtCore import pyqtSignal, Qt, QDir, QModelIndex, QFileInfo, QSize, QPoint, QRect
+from PyQt6.QtCore import pyqtSignal, Qt, QDir, QModelIndex, QFileInfo, QSize, QPoint, QRect, QEvent, QTimer
 from PyQt6.QtGui import QFont, QColor, QPainter, QFileSystemModel, QIcon, QPen, QPixmap
 
 
@@ -17,71 +18,100 @@ class ExplorerDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # 1. First, extract state (is it a folder/expanded)
+        
+        # 1. State & Geometry
+        view = self.parent()
         model = index.model()
-        is_expanded = False
-        has_children = False
-        if hasattr(model, "hasChildren") and model.hasChildren(index):
-            has_children = True
-            # Checking expansion state from the view
-            view = self.parent()
-            if isinstance(view, QTreeView):
-                is_expanded = view.isExpanded(index)
+        is_selected = (option.state & QStyle.StateFlag.State_Selected)
+        is_hover = (option.state & QStyle.StateFlag.State_MouseOver)
         
-        # 2. Draw indentation guides
-        indentation = 20
-        level = option.rect.left() // indentation
+        # Calculate level correctly (relative to the project root)
+        level = 0
+        root_index = view.rootIndex()
+        temp_index = index
+        while temp_index.parent().isValid() and temp_index.parent() != root_index:
+            temp_index = temp_index.parent()
+            level += 1
+            
+        # Refined VS Code measurements (Flushed Left)
+        indent_width = 12
+        left_offset = 6
+        icon_size = 16
         
-        if level > 0:
-            # VS Code style: Remove lines from folder rows, but keep them solid on file rows.
-            # Using cosmetic 0-width pen for sharp 1px grey line.
-            if not has_children:
-                pen = QPen(QColor(self.theme.get('text_disabled', '#636366')), 0) 
-                painter.setPen(pen)
-                for i in range(1, level + 1):
-                    x = (i - 1) * indentation + 8 
-                    painter.drawLine(x, option.rect.top(), x, option.rect.bottom())
-
-        # 3. Draw modern chevrons if it's a folder/has children
-        if has_children:
-            # We draw a small triangle (chevron)
-            chevron_size = 8
-            chevron_rect = QRect(option.rect.left() - 16, option.rect.center().y() - 4, chevron_size, chevron_size)
-            
-            painter.setBrush(QColor(self.theme.get('text_secondary', '#888888')))
-            
-            painter.setPen(QPen(QColor(self.theme.get('text_secondary', '#888888')), 1.2))
-            painter.translate(chevron_rect.topLeft())
-            
-            if is_expanded:
-                # Downward chevron: \/
-                painter.drawPolyline([QPoint(1, 3), QPoint(4, 6), QPoint(7, 3)])
-            else:
-                # Rightward chevron: >
-                painter.drawPolyline([QPoint(3, 1), QPoint(6, 4), QPoint(3, 7)])
-            
-            painter.translate(-chevron_rect.topLeft())
-
-        painter.restore()
+        # Base horizontal positions
+        chevron_x = left_offset + (level * indent_width)
+        icon_x = chevron_x + 16
+        text_x = icon_x + 22
         
-        # 4. Selection Indicator (Monochrome Left Bar)
-        if option.state & QStyle.StateFlag.State_Selected:
+        # 2. Draw Background (Full Width)
+        # Use a slightly larger rect to ensure perfectly continuous guide lines
+        row_rect = option.rect
+        full_row_rect = QRect(0, row_rect.top(), view.viewport().width(), row_rect.height())
+        
+        if is_selected:
+            painter.fillRect(full_row_rect, QColor(self.theme.get('bg_selection', '#2c2c2e')))
+            # Sharp 2px accent bar
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(self.theme.get('text_bright', '#ffffff')))
-            # Draw a thin 2px bar on the far left of the row
-            # We use x=0 but ensure we're not relative to the indentation
-            # QTreeView items usually have option.rect relative to the full row if decoration selected
-            painter.drawRect(0, option.rect.top(), 2, option.rect.height())
+            painter.drawRect(0, row_rect.top(), 2, row_rect.height())
+        elif is_hover:
+            painter.fillRect(full_row_rect, QColor(self.theme.get('bg_hover', '#1c1c1e')))
 
-        # 5. Standard paint for icon/text (with a bit of offset)
-        new_option = QStyleOptionViewItem(option)
-        super().paint(painter, new_option, index)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # 3. Structural Guides (Vertical Lines)
+        # Precise positioning for continuous, sharp lines
+        if level > 0:
+            # Disable antialiasing for pixel-perfect 1px lines
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            
+            # Increase opacity for high visibility (nearly 50% white)
+            guide_color = QColor(255, 255, 255, 120) 
+            painter.setPen(QPen(guide_color, 0)) # Cosmetic 0-width pen is 1px sharp
+            
+            for i in range(1, level + 1):
+                # Align guide with the vertical center of the hierarchy step
+                gx = left_offset + ((i-1) * indent_width) + 4
+                painter.drawLine(gx, row_rect.top(), gx, row_rect.bottom())
+                
+            # Re-enable for the rest
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # 4. Chevron (Arrow)
+        has_children = model.hasChildren(index) if hasattr(model, "hasChildren") else False
+        if has_children:
+            is_expanded = view.isExpanded(index) if isinstance(view, QTreeView) else False
+            cy = row_rect.center().y()
+            cx = chevron_x
+            
+            painter.setPen(QPen(QColor(self.theme.get('text_secondary', '#888888')), 1.2))
+            if is_expanded:
+                # ⌄ (Smaller, sharper)
+                painter.drawPolyline([QPoint(cx, cy - 2), QPoint(cx + 4, cy + 2), QPoint(cx + 8, cy - 2)])
+            else:
+                # › (Sharper)
+                painter.drawPolyline([QPoint(cx + 2, cy - 4), QPoint(cx + 6, cy), QPoint(cx + 2, cy + 4)])
+
+        # 5. Icon Rendering
+        icon = index.data(Qt.ItemDataRole.DecorationRole)
+        icon_rect = QRect(icon_x, row_rect.center().y() - 8, icon_size, icon_size)
+        if isinstance(icon, QIcon):
+            icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
+            
+        # 6. Text Rendering
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        text_color = QColor(self.theme.get('text_bright' if is_selected else 'sidebar_fg', '#ffffff'))
+        text_rect = QRect(text_x, row_rect.top(), row_rect.width() - text_x, row_rect.height())
+        
+        painter.setFont(option.font)
+        painter.setPen(text_color)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        
+        painter.restore()
 
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
-        size.setHeight(22) # Tighter row height to see more files
+        size.setHeight(24) # Standard VS Code row height
         return size
 
 
@@ -275,10 +305,151 @@ def style_list_widget(widget, theme):
 
 
 
+class InlineCreator(QWidget):
+    """Inline creation row with icon and input, VS Code style."""
+    accepted = pyqtSignal(str)
+    rejected = pyqtSignal()
+
+    def __init__(self, theme, is_folder, parent=None):
+        super().__init__(parent)
+        self.theme = theme
+        self.is_folder = is_folder
+        self._committed = False
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        
+        # Icon
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(16, 16)
+        
+        icons_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "assets", "icons"
+        )
+        icon_file = "folder_closed.svg" if is_folder else "file_text.svg"
+        icon_path = os.path.join(icons_path, icon_file)
+        if os.path.exists(icon_path):
+            self.icon_label.setPixmap(QIcon(icon_path).pixmap(16, 16))
+        
+        layout.addWidget(self.icon_label)
+        
+        # Input
+        self.input = QLineEdit()
+        self.input.setFrame(False)
+        self.input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {theme['input_bg']};
+                color: {theme['input_fg']};
+                border: 1px solid #007acc;
+                padding: 1px 4px;
+                font-family: 'Segoe UI';
+                font-size: 13px;
+                selection-background-color: #094771;
+            }}
+        """)
+        layout.addWidget(self.input)
+        
+        self.input.returnPressed.connect(self._on_accept)
+        # Global click dismissal
+        QApplication.instance().installEventFilter(self)
+        
+    def _on_accept(self):
+        if not self._committed:
+            text = self.input.text().strip()
+            self._committed = True
+            if text:
+                self.accepted.emit(text)
+            else:
+                self.rejected.emit()
+            self.hide()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress:
+            # If clicked anywhere outside this widget, commit (or cancel if empty)
+            click_pos = event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos()
+            if not self.rect().contains(self.mapFromGlobal(click_pos)):
+                self._on_accept()
+        return super().eventFilter(obj, event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self._committed = True
+            self.rejected.emit()
+            self.hide()
+        else:
+            super().keyPressEvent(event)
+
+    def setFocus(self):
+        self.input.setFocus()
+        self.input.selectAll()
+
+    def setText(self, text):
+        self.input.setText(text)
+        self.input.selectAll()
+
+    def text(self):
+        return self.input.text()
+
+    def hide(self):
+        QApplication.instance().removeEventFilter(self)
+        super().hide()
+
+
+class ExplorerContainer(QFrame):
+    """Container that clicks to focus the inner tree and tracks focus state."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setProperty("focused", "false")
+        # Watch global focus changes for appearance updates
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
+        # Install a global event filter to catch clicks *anywhere* for dismissal
+        QApplication.instance().installEventFilter(self)
+
+    def mousePressEvent(self, event):
+        # When clicking blank space, stay focused on the container to show the border
+        self.setFocus()
+        super().mousePressEvent(event)
+
+    def eventFilter(self, obj, event):
+        # If we see a mouse press anywhere in the application
+        if event.type() == QEvent.Type.MouseButtonPress:
+            # Check if the click is outside this container
+            # We use globalPosition() if available, or pos()
+            click_pos = event.globalPosition().toPoint() if hasattr(event, "globalPosition") else event.globalPos()
+            local_pos = self.mapFromGlobal(click_pos)
+            
+            if not self.rect().contains(local_pos):
+                # Clicked outside! Remove the focus border.
+                if self.property("focused") == "true":
+                    self.setProperty("focused", "false")
+                    self.style().unpolish(self)
+                    self.style().polish(self)
+        
+        return super().eventFilter(obj, event)
+
+    def _on_focus_changed(self, old, new):
+        """Update border state when focus moves globally."""
+        if not self.isVisible(): return
+        
+        # New logic: Only show the blue PANE border if the focus is on the CONTAINER itself
+        # (the blank space). When clicking a file (tree), we only show the file selection.
+        is_focused = (new == self)
+        
+        state = "true" if is_focused else "false"
+        if self.property("focused") != state:
+            self.setProperty("focused", state)
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+
 class FileExplorerPanel(QWidget):
     """The main 'Explorer' container with multiple sections."""
 
     file_opened = pyqtSignal(str)
+    terminal_requested = pyqtSignal(str)
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -286,7 +457,7 @@ class FileExplorerPanel(QWidget):
         self._root_path = ""
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(1, 1, 1, 1) # 1px "gutter" for the focus border
         layout.setSpacing(0)
 
         # 1. Main Header
@@ -325,13 +496,23 @@ class FileExplorerPanel(QWidget):
                                     "*.csv", "*.sql", "*.sh", "*.bat", "*.ps1"])
         self.model.setNameFilterDisables(False)
 
-        # Tree view
+        # Tree view wrapper for Focus Border
+        self.tree_container = ExplorerContainer()
+        self.tree_container.setObjectName("explorerContainer")
+        container_layout = QVBoxLayout(self.tree_container)
+        container_layout.setContentsMargins(1, 1, 1, 1)
+        container_layout.setSpacing(0)
+        
         self.tree = QTreeView()
+        self.tree.setObjectName("explorerTree")
         self.tree.setModel(self.model)
         self.tree.setItemDelegate(ExplorerDelegate(theme, self.tree))
         self.tree.setHeaderHidden(True)
         self.tree.setAnimated(True)
-        self.tree.setIndentation(20) # More space like VS Code
+        self.tree.setIndentation(0) # We handle indentation manually in the delegate
+        self.tree.setRootIsDecorated(False) # Disable native arrows
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tree.setColumnHidden(1, True)
         self.tree.setColumnHidden(2, True)
@@ -348,6 +529,17 @@ class FileExplorerPanel(QWidget):
 
         # High-Fidelity Styling
         self.tree.setFont(QFont("Segoe UI", 10))
+        
+        # Style the container and tree
+        self.tree_container.setStyleSheet(f"""
+            QFrame#explorerContainer {{
+                border: 1px solid transparent;
+            }}
+            QFrame#explorerContainer[focused="true"] {{
+                border: 1px solid #007acc;
+            }}
+        """)
+        
         self.tree.setStyleSheet(f"""
             QTreeView {{
                 background-color: {theme['sidebar_bg']};
@@ -356,7 +548,7 @@ class FileExplorerPanel(QWidget):
                 outline: none;
             }}
             QTreeView::item {{
-                height: 26px;
+                height: 24px;
                 padding-left: 0px;
                 border: none;
             }}
@@ -364,26 +556,27 @@ class FileExplorerPanel(QWidget):
                 background-color: {theme['bg_hover']};
             }}
             QTreeView::item:selected {{
-                background-color: {theme['bg_selection']};
+                background-color: #094771; /* Vibrant VS Code Blue ("blue ones") */
+                color: #ffffff;
+            }}
+            QTreeView::item:selected:!active {{
+                background-color: {theme['bg_selection']}; /* Gray when inactive */
                 color: {theme['text_bright']};
             }}
             QTreeView::branch {{
                 background-color: transparent;
-            }}
-            QTreeView::branch:has-children:!has-siblings:closed,
-            QTreeView::branch:closed:has-children:has-siblings {{
+                image: none;
                 border-image: none;
-                image: none; 
             }}
         """)
 
-        layout.addWidget(self.tree, 100) # Give high priority stretch
-        self.folder_header.toggled.connect(self.tree.setVisible)
-
-        # Add a small-priority stretch at the bottom
-        # This ensures that when the tree is collapsed (hidden), everything snaps to the top.
-        # When tree is visible, it takes 100/101 of the extra space.
-        layout.addStretch(1)
+        container_layout.addWidget(self.tree)
+        layout.addWidget(self.tree_container, 100) # Give high priority stretch
+        
+        # Ensure container can handle focus
+        self.tree_container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
+        self.folder_header.toggled.connect(self.tree_container.setVisible)
 
     def set_root_folder(self, path: str):
         """Set the root folder to display in the explorer."""
@@ -448,17 +641,81 @@ class FileExplorerPanel(QWidget):
 
     def _show_context_menu(self, position):
         from PyQt6.QtWidgets import QMenu
-        menu = QMenu(self)
-        menu.addAction("New File", self.cmd_new_file)
-        menu.addAction("New Folder", self.cmd_new_folder)
-        menu.addSeparator()
+        from PyQt6.QtGui import QAction
         
         index = self.tree.indexAt(position)
-        if index.isValid():
-            menu.addAction("Delete", lambda: self.cmd_delete(index))
-            menu.addAction("Rename", lambda: self.cmd_rename(index))
+        path = self.model.filePath(index) if index.isValid() else self._root_path
+        is_dir = self.model.isDir(index) if index.isValid() else True
         
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {self.theme['sidebar_bg']};
+                color: {self.theme['sidebar_fg']};
+                border: 1px solid {self.theme['border']};
+            }}
+            QMenu::item:selected {{
+                background-color: {self.theme['bg_selection']};
+            }}
+        """)
+        
+        # File Operations
+        menu.addAction("New File", lambda: self.cmd_new_file(path if is_dir else os.path.dirname(path)))
+        menu.addAction("New Folder", lambda: self.cmd_new_folder(path if is_dir else os.path.dirname(path)))
+        menu.addSeparator()
+        
+        # Actions for everything
+        menu.addAction("Reveal in File Explorer", lambda: self.cmd_reveal(path))
+        menu.addAction("Open in Integrated Terminal", lambda: self.cmd_open_terminal(path if is_dir else os.path.dirname(path)))
+        menu.addSeparator()
+        
+        # Premium/Pro placeholders
+        menu.addAction("Share", lambda: print("Share requested")).setEnabled(False)
+        menu.addSeparator()
+
+        menu.addAction("Add Folder to Workspace...", lambda: print("Add to workspace")).setEnabled(False)
+        menu.addAction("Open Folder Settings", lambda: print("Folder settings")).setEnabled(False)
+        menu.addAction("Remove Folder from Workspace", lambda: print("Remove from workspace")).setEnabled(False)
+        menu.addSeparator()
+
+        menu.addAction("Find in Folder...", lambda: print("Find in folder requested")).setEnabled(index.isValid() and is_dir)
+        menu.addSeparator()
+        
+        menu.addAction("Paste", lambda: print("Paste requested")).setEnabled(False)
+        menu.addSeparator()
+        
+        menu.addAction("Copy Path", lambda: self.cmd_copy_path(path))
+        menu.addAction("Copy Relative Path", lambda: self.cmd_copy_relative_path(path))
+        
+        if index.isValid():
+            menu.addSeparator()
+            menu.addAction("Rename", lambda: self.cmd_rename(index))
+            menu.addAction("Delete", lambda: self.cmd_delete(index))
+            
         menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def cmd_reveal(self, path):
+        """Open the file location in system explorer."""
+        if os.path.exists(path):
+            if os.name == 'nt':
+                os.startfile(os.path.dirname(path) if not os.path.isdir(path) else path)
+            else:
+                import subprocess
+                subprocess.run(['open' if sys.platform == 'darwin' else 'xdg-open', os.path.dirname(path)])
+
+    def cmd_open_terminal(self, path):
+        """Request opening a terminal at the specified path."""
+        self.terminal_requested.emit(path)
+
+    def cmd_copy_path(self, path):
+        from PyQt6.QtWidgets import QApplication
+        QApplication.clipboard().setText(path)
+
+    def cmd_copy_relative_path(self, path):
+        if self._root_path:
+            rel = os.path.relpath(path, self._root_path)
+            from PyQt6.QtWidgets import QApplication
+            QApplication.clipboard().setText(rel)
 
     def cmd_delete(self, index: QModelIndex):
         path = self.model.filePath(index)
@@ -474,39 +731,135 @@ class FileExplorerPanel(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not delete: {e}")
 
-    def cmd_rename(self, index: QModelIndex):
-        old_path = self.model.filePath(index)
-        old_name = os.path.basename(old_path)
-        new_name, ok = QInputDialog.getText(self, "Rename", "Enter new name:", text=old_name)
-        if ok and new_name and new_name != old_name:
-            new_path = os.path.join(os.path.dirname(old_path), new_name)
-            try:
-                os.rename(old_path, new_path)
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not rename: {e}")
-
-
     # Explorer Actions
-    def cmd_new_file(self):
-        if not self._root_path: return
-        name, ok = QInputDialog.getText(self, "New File", "Enter file name:")
-        if ok and name:
-            path = os.path.join(self._root_path, name)
-            try:
+    def cmd_new_file(self, base_path=None):
+        self._start_inline_creation(base_path, is_folder=False)
+
+    def cmd_new_folder(self, base_path=None):
+        self._start_inline_creation(base_path, is_folder=True)
+
+    def cmd_rename(self, index: QModelIndex):
+        if not index.isValid(): return
+        old_path = self.model.filePath(index)
+        base_dir = os.path.dirname(old_path)
+        old_name = os.path.basename(old_path)
+
+        # Instead of QInputDialog, use the inline editor!
+        self._start_inline_creation(base_dir, is_folder=self.model.isDir(index), rename_index=index)
+
+    def _start_inline_creation(self, base_path, is_folder, rename_index=None):
+        target_dir = base_path or self._root_path
+        if not target_dir: return
+
+        # 1. Determine index and level
+        parent_index = self.model.index(target_dir) if not rename_index else rename_index.parent()
+        item_index = rename_index if rename_index else None
+        
+        # Ensure expanded if it's a folder
+        if parent_index.isValid() and self.model.isDir(parent_index):
+            self.tree.expand(parent_index)
+
+        # Calculate level for indent
+        level = 0
+        
+        if item_index:
+            # Renaming: calculate the level of the item being renamed
+            temp = item_index
+            while temp.parent().isValid() and temp.parent() != self.tree.rootIndex():
+                temp = temp.parent()
+                level += 1
+        else:
+            # Creating: calculate the level where the NEW item will appear
+            # (one level deeper than the parent folder)
+            temp = parent_index
+            while temp.isValid() and temp != self.tree.rootIndex():
+                temp = temp.parent()
+                level += 1
+
+        # Calculate Position  
+        row_y = 0
+        parent_widget = self.tree.viewport()  # Default parent
+        
+        if item_index:
+            # Renaming: position directly over the item
+            row_y = self.tree.visualRect(item_index).top()
+        elif target_dir == self._root_path:
+            # Root creation: insert spacer to push tree down (VS Code style)
+            tree_container_layout = self.tree.parent().layout()
+            if tree_container_layout:
+                self._push_spacer = QWidget()
+                self._push_spacer.setFixedHeight(24)
+                self._push_spacer.setStyleSheet(f"background-color: {self.theme['sidebar_bg']};")
+                tree_container_layout.insertWidget(0, self._push_spacer)
+                parent_widget = self._push_spacer  # Parent to spacer so input appears inside it
+                row_y = 1  # Small offset from top of spacer
+        else:
+            # Folder creation: position just after the folder header  
+            row_y = self.tree.visualRect(parent_index).bottom()
+            
+        # Create or update the editor
+        if hasattr(self, 'inline_editor'):
+            self.inline_editor.deleteLater()
+            
+        self.inline_editor = InlineCreator(self.theme, is_folder, parent_widget)
+        self.inline_editor.rejected.connect(self._cancel_inline_creation)
+        
+        if rename_index:
+            old_name = os.path.basename(self.model.filePath(rename_index))
+            self.inline_editor.setText(old_name)
+            self.inline_editor.accepted.connect(lambda name: self._finish_rename(rename_index, name))
+        else:
+            self.inline_editor.accepted.connect(lambda name: self._finish_inline_creation(target_dir, name, is_folder))
+
+        # Indent measurements
+        indent_width = 12
+        left_offset = 6
+        icon_x = left_offset + (level * indent_width) + 16
+
+        width = self.tree.viewport().width() - icon_x - 10
+        self.inline_editor.setGeometry(icon_x, row_y + 1, width, 22)
+        self.inline_editor.show()
+        self.inline_editor.setFocus()
+
+    def _cancel_inline_creation(self):
+        # Clean up inline editor FIRST (before deleting its potential parent)
+        if hasattr(self, 'inline_editor'):
+            self.inline_editor.hide()
+            self.inline_editor.deleteLater()
+            del self.inline_editor
+        
+        # Then remove push spacer
+        if hasattr(self, '_push_spacer'):
+            self._push_spacer.deleteLater()
+            del self._push_spacer
+
+    def _finish_rename(self, index, new_name):
+        self._cancel_inline_creation()
+        if not index.isValid() or not new_name: return
+        
+        old_path = self.model.filePath(index)
+        if os.path.basename(old_path) == new_name: return
+        
+        new_path = os.path.join(os.path.dirname(old_path), new_name)
+        try:
+            os.rename(old_path, new_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not rename: {e}")
+
+    def _finish_inline_creation(self, target_dir, name, is_folder):
+        self._cancel_inline_creation()
+        if not name: return
+
+        path = os.path.join(target_dir, name)
+        try:
+            if is_folder:
+                os.makedirs(path, exist_ok=True)
+            else:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
                 open(path, 'a').close()
                 self.file_opened.emit(path)
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not create file: {e}")
-
-    def cmd_new_folder(self):
-        if not self._root_path: return
-        name, ok = QInputDialog.getText(self, "New Folder", "Enter folder name:")
-        if ok and name:
-            path = os.path.join(self._root_path, name)
-            try:
-                os.makedirs(path, exist_ok=True)
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not create folder: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not create {'folder' if is_folder else 'file'}: {e}")
 
     def cmd_refresh(self):
         if self._root_path:
@@ -626,6 +979,7 @@ class Sidebar(QWidget):
     """Main sidebar that switches between panels."""
 
     file_opened = pyqtSignal(str)
+    terminal_requested = pyqtSignal(str)
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -641,6 +995,7 @@ class Sidebar(QWidget):
 
         self.explorer_panel = FileExplorerPanel(theme, self)
         self.explorer_panel.file_opened.connect(self.file_opened.emit)
+        self.explorer_panel.terminal_requested.connect(self.terminal_requested.emit)
         self.search_panel = SearchPanel(theme, self)
         self.scm_panel = SourceControlPanel(theme, self)
         self.debug_panel = DebugPanel(theme, self)

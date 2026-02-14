@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
 
         self.sidebar = Sidebar(self.theme, self)
         self.sidebar.file_opened.connect(self._open_file)
+        self.sidebar.terminal_requested.connect(self._on_terminal_requested)
         # self.sidebar.setFixedWidth(280) # Removed to allow resizing
         self.sidebar.setMinimumWidth(50) # Allow shrinking
 
@@ -570,7 +571,7 @@ class MainWindow(QMainWindow):
             f"<h2>Lutervyn IDE</h2>"
             f"<p><b>Version {self.VERSION}</b></p>"
             f"<hr>"
-            f"<p>A Python IDE inspired by Visual Studio Code.</p>"
+            f"<p>A Python IDE made by LUTERVYN.</p>"
             f"<p>Built with Python + PyQt6 + QScintilla.</p>"
             f"<br>"
             f"<table>"
@@ -587,6 +588,14 @@ class MainWindow(QMainWindow):
             self.editor_tabs.open_file(file_path)
             self._update_title(file_path)
             self._update_language(file_path)
+
+    def _on_terminal_requested(self, path):
+        """Open a terminal at the specified path."""
+        self.cmd_new_terminal()
+        if os.path.isdir(path):
+            self.panel.terminal.run_command(f'cd "{path}"')
+        else:
+            self.panel.terminal.run_command(f'cd "{os.path.dirname(path)}"')
 
     def _update_title(self, file_path):
         name = os.path.basename(file_path)
