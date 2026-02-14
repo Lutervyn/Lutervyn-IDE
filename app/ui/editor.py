@@ -294,6 +294,7 @@ class EditorTabs(QWidget):
     """Tabbed editor area that manages multiple open files."""
 
     file_modified = pyqtSignal(str, bool)  # (file_path, is_modified)
+    tabs_changed = pyqtSignal()
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -338,6 +339,7 @@ class EditorTabs(QWidget):
 
         # Track it
         self._open_files[file_path] = index
+        self.tabs_changed.emit()
 
         # Listen for modifications
         editor.modificationChanged.connect(
@@ -357,6 +359,7 @@ class EditorTabs(QWidget):
             self._open_files.pop(widget.file_path, None)
 
         self.tabs.removeTab(index)
+        self.tabs_changed.emit()
 
         # Rebuild index map
         self._open_files.clear()

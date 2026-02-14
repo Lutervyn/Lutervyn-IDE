@@ -220,7 +220,7 @@ class MainWindow(QMainWindow):
 
 
         right_area = QSplitter(Qt.Orientation.Vertical)
-        right_area.setHandleWidth(6)
+        right_area.setHandleWidth(1)
         self.editor_tabs = EditorTabs(self.theme, self)
         self.panel = BottomPanel(self.theme, self)
         self.panel.setMinimumHeight(100)
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
         right_area.setSizes([500, 200])
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.setHandleWidth(6)
+        self.main_splitter.setHandleWidth(1)
         self.main_splitter.addWidget(self.sidebar)
         self.main_splitter.addWidget(right_area)
         self.main_splitter.setSizes([280, 1100])
@@ -245,6 +245,20 @@ class MainWindow(QMainWindow):
 
         self.status_bar = StatusBar(self.theme, self)
         root_layout.addWidget(self.status_bar)
+
+        # Connect Sidebar and EditorTabs for synchronization
+        self.editor_tabs.tabs_changed.connect(self._sync_open_editors)
+        self._sync_open_editors() # Initial sync
+
+    def _sync_open_editors(self):
+        """Send the list of open files to the sidebar."""
+        open_files = []
+        for i in range(self.editor_tabs.tabs.count()):
+            widget = self.editor_tabs.tabs.widget(i)
+            from app.ui.editor import CodeEditorWidget
+            if isinstance(widget, CodeEditorWidget):
+                open_files.append(widget.file_path)
+        self.sidebar.explorer_panel.sync_open_editors(open_files)
 
     def _on_minimize(self):
         self.showMinimized()

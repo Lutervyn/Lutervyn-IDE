@@ -46,19 +46,15 @@ class ActivityBarButton(QPushButton):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
         # Background on hover
         if self.underMouse() and not self._active:
-            painter.fillRect(self.rect(), QColor(self.parent().theme.get('bg_hover', '#2c2c2e')))
+            painter.fillRect(self.rect(), QColor(self.parent().theme.get('bg_hover', '#1c1c1e')))
 
         # Active indicator (left border bar)
         if self._active:
-            painter.fillRect(0, 10, 2, self.height() - 20, QColor(self.parent().theme.get('activitybar_active_fg', '#007aff')))
+            painter.fillRect(0, 10, 2, self.height() - 20, QColor(self.parent().theme.get('activitybar_active_fg', '#ffffff')))
 
         # Draw Icon (Tinted)
         if os.path.exists(self._icon_path):

@@ -87,6 +87,7 @@ class TerminalWidget(QPlainTextEdit):
                 border: none;
                 padding: 10px;
                 selection-background-color: {theme['bg_selection']};
+                selection-color: #000000;
             }}
         """)
 
@@ -358,7 +359,8 @@ class BottomPanel(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(self.theme['panel_bg']))
-        # Thin separator at the very top
-        p.setPen(QColor(self.theme['panel_border']))
+        
+        # Subtle top border for separation
+        p.setPen(QColor(self.theme.get('bg_light', '#3a3a3c')))
         p.drawLine(0, 0, self.width(), 0)
         p.end()

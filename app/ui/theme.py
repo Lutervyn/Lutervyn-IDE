@@ -7,13 +7,13 @@ DARK_THEME = {
     "name": "Lutervyn iOS Dark",
 
     # Base colors (iOS Dark / VS Code Modern)
-    "bg_darkest": "#1c1c1e",  # Sidebar/Panel
-    "bg_dark": "#1c1c1e",     # Surface (Activity Bar)
-    "bg_medium": "#2c2c2e",   # Inputs/Hover
-    "bg_light": "#3a3a3c",    # Borders
-    "bg_hover": "#2c2c2e",
-    "bg_active": "#0a84ff",
-    "bg_selection": "#0a84ff",
+    "bg_darkest": "#000000",  # Pure Black Sidebar/Panel
+    "bg_dark": "#000000",     # Surface (Activity Bar)
+    "bg_medium": "#1c1c1e",   # Inputs/Hover
+    "bg_light": "#333333",    # Borders
+    "bg_hover": "#1c1c1e",
+    "bg_active": "#2c2c2e",
+    "bg_selection": "#2c2c2e",
 
     # Text
     "text_primary": "#ffffff",
@@ -26,50 +26,50 @@ DARK_THEME = {
     "border_light": "#48484a",
 
     # Accent
-    "accent": "#0a84ff",        # iOS Blue
-    "accent_hover": "#007aff",
-    "accent_fg": "#ffffff",
+    "accent": "#ffffff",        # Monochrome White
+    "accent_hover": "#f2f2f7",
+    "accent_fg": "#000000",
 
     # Activity bar
-    "activitybar_bg": "#1c1c1e",
+    "activitybar_bg": "#000000",
     "activitybar_fg": "#8e8e93",
-    "activitybar_active_fg": "#0a84ff",
-    "activitybar_active_border": "transparent", # No border, just icon color
+    "activitybar_active_fg": "#ffffff",
+    "activitybar_active_border": "transparent",
     "activitybar_badge_bg": "#ff3b30", # iOS Red for badges
     "activitybar_badge_fg": "#ffffff",
 
     # Sidebar
-    "sidebar_bg": "#1c1c1e",
+    "sidebar_bg": "#000000",
     "sidebar_fg": "#d1d1d6",
-    "sidebar_header_bg": "#1c1c1e",
+    "sidebar_header_bg": "#000000",
     "sidebar_header_fg": "#aeaeb2",
 
     # Editor
     "editor_bg": "#000000",      # Pure black for contrast often looks better on OLED/Modern
     "editor_fg": "#d1d1d6",
     "editor_line_highlight": "#1c1c1e",
-    "editor_selection": "#264f78",
+    "editor_selection": "#2c2c2e", # Subtle gray for selection
     "editor_gutter_bg": "#000000",
     "editor_gutter_fg": "#636366",
 
     # Tabs
     "tab_active_bg": "#000000",
     "tab_active_fg": "#ffffff",
-    "tab_active_border_top": "#0a84ff", # Colored top line
-    "tab_inactive_bg": "#1c1c1e",
+    "tab_active_border_top": "#ffffff", # Monochrome top line
+    "tab_inactive_bg": "#000000",
     "tab_inactive_fg": "#aeaeb2",
-    "tab_bar_bg": "#1c1c1e",
+    "tab_bar_bg": "#000000",
 
     # Panel (terminal / output)
     "panel_bg": "#000000",
     "panel_fg": "#d1d1d6",
-    "panel_header_bg": "#1c1c1e",
+    "panel_header_bg": "#000000",
     "panel_border": "#3a3a3c",
 
     # Status bar
-    "statusbar_bg": "#0a84ff",
+    "statusbar_bg": "#000000", # Pure Black
     "statusbar_fg": "#ffffff",
-    "statusbar_hover_bg": "#007aff",
+    "statusbar_hover_bg": "#1c1c1e",
 
     # Scrollbar
     "scrollbar_bg": "transparent",
@@ -79,17 +79,17 @@ DARK_THEME = {
     # Terminal
     "terminal_bg": "#000000",
     "terminal_fg": "#d1d1d6",
-    "terminal_cursor": "#0a84ff",
+    "terminal_cursor": "#ffffff",
 
     # Title bar
-    "titlebar_bg": "#1c1c1e",
+    "titlebar_bg": "#000000",
     "titlebar_fg": "#d1d1d6",
 
     # Input / Search
     "input_bg": "#000000",
     "input_fg": "#d1d1d6",
     "input_border": "#3a3a3c",
-    "input_border_focus": "#0a84ff", # Blue glow
+    "input_border_focus": "#ffffff", # White glow
 
     # Minimap
     "minimap_bg": "#000000",
@@ -99,17 +99,17 @@ DARK_THEME = {
     "breadcrumb_fg": "#aeaeb2",
 
     # Syntax colors (Defaulting to standard VS Code Dark+)
-    "syntax_keyword": "#569cd6",
+    "syntax_keyword": "#ffffff",    # Monochrome White
     "syntax_string": "#ce9178",
     "syntax_number": "#b5cea8",
     "syntax_comment": "#6a9955",
     "syntax_function": "#dcdcaa",
     "syntax_class": "#4ec9b0",
-    "syntax_variable": "#9cdcfe",
+    "syntax_variable": "#ffffff",   # Monochrome White
     "syntax_operator": "#d4d4d4",
     "syntax_decorator": "#dcdcaa",
     "syntax_builtin": "#4ec9b0",
-    "syntax_self": "#569cd6",
+    "syntax_self": "#ffffff",
 }
 
 LIGHT_THEME = {
@@ -251,40 +251,51 @@ def build_stylesheet(theme: dict) -> str:
         margin: 4px 10px;
     }}
     
-    /* ===== SCROLLBAR (Minimalist/Mobile-like) ===== */
+    /* ===== SCROLLBAR (VS Code Style) ===== */
     QScrollBar:vertical {{
-        background: {theme['scrollbar_bg']};
-        width: 10px;
+        background: transparent;
+        width: 12px;
         margin: 0;
     }}
     QScrollBar::handle:vertical {{
         background: {theme['scrollbar_thumb']};
-        min-height: 30px;
-        border-radius: 5px; /* Fully rounded pills */
+        min-height: 20px;
+        border-radius: 0px; 
         margin: 2px;
+        margin-left: 4px; /* Move it to the right like VS Code */
     }}
     QScrollBar::handle:vertical:hover {{
         background: {theme['scrollbar_thumb_hover']};
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0px;
+        background: none;
     }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: none;
+    }}
+
     QScrollBar:horizontal {{
-        background: {theme['scrollbar_bg']};
-        height: 10px;
+        background: transparent;
+        height: 12px;
         margin: 0;
     }}
     QScrollBar::handle:horizontal {{
         background: {theme['scrollbar_thumb']};
-        min-width: 30px;
-        border-radius: 5px;
+        min-width: 20px;
+        border-radius: 0px;
         margin: 2px;
+        margin-top: 4px;
     }}
     QScrollBar::handle:horizontal:hover {{
         background: {theme['scrollbar_thumb_hover']};
     }}
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
         width: 0px;
+        background: none;
+    }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+        background: none;
     }}
 
     /* ===== TREE VIEW (File Explorer) ===== */
@@ -299,8 +310,8 @@ def build_stylesheet(theme: dict) -> str:
     QTreeView::item {{
         padding: 4px;
         border: none;
-        border-radius: 6px; /* Rounded selection rows */
-        margin: 0px 8px; /* Spacing so rounded corners show */
+        border-radius: 0px; 
+        margin: 0px; 
     }}
     QTreeView::item:hover {{
         background-color: {theme['bg_hover']};

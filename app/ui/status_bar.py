@@ -21,9 +21,10 @@ class StatusBarItem(QLabel):
         self.setStyleSheet(f"""
             QLabel {{
                 color: {theme['statusbar_fg']};
-                padding: 0px 8px;
-                font-size: 12px;
+                padding: 0px 10px;
+                font-size: 11px;
                 background: transparent;
+                border-right: 1px solid {theme.get('bg_light', '#333333')};
             }}
             QLabel:hover {{
                 background-color: {theme['statusbar_hover_bg']};
@@ -101,4 +102,8 @@ class StatusBar(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(self.theme['statusbar_bg']))
+        
+        # Top border to separate from terminal
+        p.setPen(QColor(self.theme.get('bg_light', '#3a3a3c')))
+        p.drawLine(0, 0, self.width(), 0)
         p.end()

@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QStackedWidget, QPushButton, QTreeWidget,
                               QTreeWidgetItem, QSizePolicy, QAbstractItemView,
                               QFileIconProvider, QInputDialog, QMessageBox, QMenu,
-                              QStyledItemDelegate, QStyleOptionViewItem)
+                              QStyledItemDelegate, QStyleOptionViewItem, QListWidget, QStyle)
 from PyQt6.QtCore import pyqtSignal, Qt, QDir, QModelIndex, QFileInfo, QSize, QPoint, QRect
-from PyQt6.QtGui import QFont, QColor, QPainter, QFileSystemModel, QIcon, QPen
+from PyQt6.QtGui import QFont, QColor, QPainter, QFileSystemModel, QIcon, QPen, QPixmap
 
 
 class ExplorerDelegate(QStyledItemDelegate):
@@ -18,29 +18,31 @@ class ExplorerDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # 1. Draw indentation guides
-        indentation = 20
-        level = option.rect.left() // indentation
-        
-        if level > 0:
-            pen = QPen(QColor(self.theme.get('border', '#444444')), 0.8)
-            painter.setPen(pen)
-            for i in range(1, level + 1):
-                # Line should be at the start of each indentation block
-                x = i * indentation - 12
-                painter.drawLine(x, option.rect.top(), x, option.rect.bottom())
 
-        # 2. Extract state for chevrons
+        # 1. First, extract state (is it a folder/expanded)
         model = index.model()
         is_expanded = False
         has_children = False
-        if hasattr(index.model(), "hasChildren") and model.hasChildren(index):
+        if hasattr(model, "hasChildren") and model.hasChildren(index):
             has_children = True
             # Checking expansion state from the view
             view = self.parent()
             if isinstance(view, QTreeView):
                 is_expanded = view.isExpanded(index)
+        
+        # 2. Draw indentation guides
+        indentation = 20
+        level = option.rect.left() // indentation
+        
+        if level > 0:
+            # VS Code style: Remove lines from folder rows, but keep them solid on file rows.
+            # Using cosmetic 0-width pen for sharp 1px grey line.
+            if not has_children:
+                pen = QPen(QColor(self.theme.get('text_disabled', '#636366')), 0) 
+                painter.setPen(pen)
+                for i in range(1, level + 1):
+                    x = (i - 1) * indentation + 8 
+                    painter.drawLine(x, option.rect.top(), x, option.rect.bottom())
 
         # 3. Draw modern chevrons if it's a folder/has children
         if has_children:
@@ -48,31 +50,38 @@ class ExplorerDelegate(QStyledItemDelegate):
             chevron_size = 8
             chevron_rect = QRect(option.rect.left() - 16, option.rect.center().y() - 4, chevron_size, chevron_size)
             
-            painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(self.theme.get('text_secondary', '#888888')))
             
-            if is_expanded:
-                # Downward triangle
-                points = [QPoint(0, 2), QPoint(8, 2), QPoint(4, 6)]
-            else:
-                # Rightward triangle
-                points = [QPoint(2, 0), QPoint(2, 8), QPoint(6, 4)]
-            
+            painter.setPen(QPen(QColor(self.theme.get('text_secondary', '#888888')), 1.2))
             painter.translate(chevron_rect.topLeft())
-            painter.drawPolygon(points)
+            
+            if is_expanded:
+                # Downward chevron: \/
+                painter.drawPolyline([QPoint(1, 3), QPoint(4, 6), QPoint(7, 3)])
+            else:
+                # Rightward chevron: >
+                painter.drawPolyline([QPoint(3, 1), QPoint(6, 4), QPoint(3, 7)])
+            
             painter.translate(-chevron_rect.topLeft())
 
         painter.restore()
         
-        # 4. Standard paint for icon/text (with a bit of offset)
+        # 4. Selection Indicator (Monochrome Left Bar)
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(self.theme.get('text_bright', '#ffffff')))
+            # Draw a thin 2px bar on the far left of the row
+            # We use x=0 but ensure we're not relative to the indentation
+            # QTreeView items usually have option.rect relative to the full row if decoration selected
+            painter.drawRect(0, option.rect.top(), 2, option.rect.height())
+
+        # 5. Standard paint for icon/text (with a bit of offset)
         new_option = QStyleOptionViewItem(option)
-        # We handle selection highlight in the stylesheet mostly, 
-        # but we can adjust icon/text position here if needed.
         super().paint(painter, new_option, index)
 
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
-        size.setHeight(28) # Even taller for that premium feel
+        size.setHeight(22) # Tighter row height to see more files
         return size
 
 
@@ -116,8 +125,78 @@ class VSCodeIconProvider(QFileIconProvider):
         return super().icon(info)
 
 
+class SectionHeader(QWidget):
+    """Collapsible section header with a slim chevron."""
+    
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, title: str, theme: dict, parent=None):
+        super().__init__(parent)
+        self.theme = theme
+        self.title = title
+        self._expanded = True
+        self.setFixedHeight(24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 0, 8, 0)
+        layout.setSpacing(4)
+
+        self.chevron = QLabel()
+        self.chevron.setFixedSize(16, 16)
+        self.chevron.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._expanded = True
+        self._update_chevron()
+        layout.addWidget(self.chevron)
+        
+        self.label = QLabel(title)
+        font = QFont("Segoe UI", 10, QFont.Weight.Normal)
+        font.setFamilies(["Segoe UI", "SF Pro Text", "Helvetica Neue", "Arial", "sans-serif"])
+        self.label.setFont(font)
+        self.label.setStyleSheet(f"color: {theme['text_secondary']};")
+        layout.addWidget(self.label)
+        
+        layout.addStretch()
+
+        # Separators
+        self.setStyleSheet(f"""
+            SectionHeader {{
+                background-color: {theme['sidebar_bg']};
+                border-top: 1px solid {theme['border']};
+            }}
+            SectionHeader:hover {{
+                background-color: {theme['bg_hover']};
+            }}
+        """)
+
+    def _update_chevron(self):
+        # Draw a custom pixel-perfect stroke chevron
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(self.theme['text_secondary']), 1.8)) # Slightly thicker
+        
+        if self._expanded:
+            # ⌄ (Stroke style)
+            painter.drawPolyline([QPoint(4, 6), QPoint(8, 10), QPoint(12, 6)])
+        else:
+            # › (Stroke style)
+            painter.drawPolyline([QPoint(6, 4), QPoint(10, 8), QPoint(6, 12)])
+        
+        painter.end()
+        self.chevron.setPixmap(pixmap)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._expanded = not self._expanded
+            self._update_chevron()
+            self.toggled.emit(self._expanded)
+        super().mousePressEvent(event)
+
+
 class SidebarHeader(QWidget):
-    """Header bar for each sidebar section (e.g. 'EXPLORER')."""
+    """Main container header (e.g. 'Explorer')."""
 
     def __init__(self, title: str, theme: dict, parent=None):
         super().__init__(parent)
@@ -125,17 +204,14 @@ class SidebarHeader(QWidget):
         self.setFixedHeight(35)
 
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(12, 0, 8, 0) # More aligned
+        self.layout.setContentsMargins(12, 0, 8, 0)
         self.layout.setSpacing(2)
 
-        self.label = QLabel(title.upper())
-        # More pronounced font for the main section header
-        font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+        self.label = QLabel(title)
+        font = QFont("Segoe UI", 11)
         font.setFamilies(["Segoe UI", "SF Pro Text", "Helvetica Neue", "Arial", "sans-serif"])
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.2)
         self.label.setFont(font)
-
-        self.label.setStyleSheet(f"color: {theme['text_secondary']};")
+        self.label.setStyleSheet(f"color: {theme['sidebar_fg']};")
         self.layout.addWidget(self.label)
         self.layout.addStretch()
 
@@ -171,16 +247,38 @@ class SidebarHeader(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        # Subtle separator at the top maybe? VS Code usually has very clean borders.
         p.fillRect(self.rect(), QColor(self.theme['sidebar_bg']))
         p.end()
 
 
+def style_list_widget(widget, theme):
+    """Helper to style list widgets consistently."""
+    widget.setStyleSheet(f"""
+        QListWidget {{
+            background-color: {theme['sidebar_bg']};
+            color: {theme['sidebar_fg']};
+            border: none;
+            outline: none;
+        }}
+        QListWidget::item {{
+            height: 24px;
+            padding-left: 12px;
+        }}
+        QListWidget::item:hover {{
+            background-color: {theme['bg_hover']};
+        }}
+        QListWidget::item:selected {{
+            background-color: {theme['bg_selection']};
+            color: #000000;
+        }}
+    """)
+
+
 
 class FileExplorerPanel(QWidget):
-    """File tree explorer — the main sidebar view."""
+    """The main 'Explorer' container with multiple sections."""
 
-    file_opened = pyqtSignal(str)  # Emits file path when double-clicked
+    file_opened = pyqtSignal(str)
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -191,7 +289,7 @@ class FileExplorerPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
+        # 1. Main Header
         self.header = SidebarHeader("Explorer", theme, self)
         self.header.add_action("action_new_file.svg", "New File", self.cmd_new_file)
         self.header.add_action("action_new_folder.svg", "New Folder", self.cmd_new_folder)
@@ -199,15 +297,22 @@ class FileExplorerPanel(QWidget):
         self.header.add_action("action_collapse.svg", "Collapse All", self.cmd_collapse_all)
         layout.addWidget(self.header)
 
-        # Folder section header
-        self.folder_header = QLabel("  No folder opened")
-        self.folder_header.setFixedHeight(22)
-        self.folder_header.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self.folder_header.setStyleSheet(f"""
-            color: {theme['sidebar_fg']};
-            background-color: {theme['sidebar_bg']};
-            padding-left: 12px;
-        """)
+        # 2. Open Editors Section
+        self.editors_header = SectionHeader("Open Editors", theme, self)
+        layout.addWidget(self.editors_header)
+        
+        self.editors_list = QListWidget()
+        self.editors_list.setMinimumHeight(0)
+        self.editors_list.setMaximumHeight(200)
+        style_list_widget(self.editors_list, theme)
+        self.editors_list.itemDoubleClicked.connect(self._on_editor_item_double_clicked)
+        self.editors_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self.editors_list)
+        self.editors_header.toggled.connect(self._toggle_editors_visibility)
+        self._update_editor_list_height() # Initial height (0)
+
+        # 3. Project Section
+        self.folder_header = SectionHeader("No Folder", theme, self)
         layout.addWidget(self.folder_header)
 
         # File system model
@@ -242,6 +347,7 @@ class FileExplorerPanel(QWidget):
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
 
         # High-Fidelity Styling
+        self.tree.setFont(QFont("Segoe UI", 10))
         self.tree.setStyleSheet(f"""
             QTreeView {{
                 background-color: {theme['sidebar_bg']};
@@ -252,16 +358,14 @@ class FileExplorerPanel(QWidget):
             QTreeView::item {{
                 height: 26px;
                 padding-left: 0px;
-                border: 1px solid transparent;
+                border: none;
             }}
             QTreeView::item:hover {{
                 background-color: {theme['bg_hover']};
             }}
             QTreeView::item:selected {{
                 background-color: {theme['bg_selection']};
-                color: {theme['text_primary']};
-                border: 1px solid {theme['accent']};
-                border-radius: 2px;
+                color: {theme['text_bright']};
             }}
             QTreeView::branch {{
                 background-color: transparent;
@@ -269,11 +373,17 @@ class FileExplorerPanel(QWidget):
             QTreeView::branch:has-children:!has-siblings:closed,
             QTreeView::branch:closed:has-children:has-siblings {{
                 border-image: none;
-                image: none; /* We could use custom SVGs here for chevrons */
+                image: none; 
             }}
         """)
 
-        layout.addWidget(self.tree)
+        layout.addWidget(self.tree, 100) # Give high priority stretch
+        self.folder_header.toggled.connect(self.tree.setVisible)
+
+        # Add a small-priority stretch at the bottom
+        # This ensures that when the tree is collapsed (hidden), everything snaps to the top.
+        # When tree is visible, it takes 100/101 of the extra space.
+        layout.addStretch(1)
 
     def set_root_folder(self, path: str):
         """Set the root folder to display in the explorer."""
@@ -281,7 +391,39 @@ class FileExplorerPanel(QWidget):
         self.model.setRootPath(self._root_path)
         self.tree.setRootIndex(self.model.index(self._root_path))
         folder_name = os.path.basename(self._root_path)
-        self.folder_header.setText(f"  {folder_name.upper()}")
+        self.folder_header.label.setText(folder_name)
+        # Ensure it's expanded visually too
+        if not self.folder_header._expanded:
+            self.folder_header._expanded = True
+            self.folder_header._update_chevron()
+            self.tree.setVisible(True)
+
+    def _toggle_editors_visibility(self, visible):
+        self.editors_list.setVisible(visible)
+        if visible:
+            self._update_editor_list_height()
+
+    def _update_editor_list_height(self):
+        # Adjust height based on item count
+        count = self.editors_list.count()
+        self.editors_list.setFixedHeight(min(200, count * 24 + 4) if count > 0 else 0)
+
+    def sync_open_editors(self, files: list[str]):
+        """Update the 'Open Editors' list from the main window."""
+        self.editors_list.clear()
+        from PyQt6.QtWidgets import QListWidgetItem
+        for f in files:
+            name = os.path.basename(f)
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, f)
+            # Add icon if available
+            self.editors_list.addItem(item)
+        self._update_editor_list_height()
+
+    def _on_editor_item_double_clicked(self, item):
+        file_path = item.data(Qt.ItemDataRole.UserRole)
+        if file_path:
+            self.file_opened.emit(file_path)
 
     def _on_item_double_clicked(self, index: QModelIndex):
         path = self.model.filePath(index)
