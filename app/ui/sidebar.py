@@ -100,12 +100,56 @@ class ExplorerDelegate(QStyledItemDelegate):
         # 6. Text Rendering
         if not (self.section and self.section.editing_index == index):
             text = index.data(Qt.ItemDataRole.DisplayRole)
+            path = os.path.normpath(model.filePath(index))
+            
+            # SCM Status logic
+            status = None
+            scm_dict = self.section.scm_status if self.section else {}
+            
+            # 1. Direct status (for files or exact folder match)
+            if path in scm_dict:
+                status = scm_dict[path]
+            
+            # 2. Inherited status for folders
+            is_dir = model.isDir(index)
+            if is_dir and not status:
+                dir_path_with_sep = path + os.sep
+                for p in scm_dict:
+                    if p.startswith(dir_path_with_sep):
+                        # Inherit 'M' if any child is changed
+                        status = 'MOD_CHILD' 
+                        break
+            
+            # Colors from user request
+            scm_colors = {
+                'M': '#e2c08d', 'A': '#73c991', 'D': '#c74e39',
+                'U': '#73c991', 'R': '#4ec9b0', 'C': '#4ec9b0', 
+                '?': '#73c991', 'MOD_CHILD': '#e2c08d'
+            }
+            
             text_color = QColor(self.theme.get('text_bright' if is_selected else 'sidebar_fg', '#ffffff'))
-            text_rect = QRect(text_x, row_rect.top(), row_rect.width() - text_x, row_rect.height())
+            if status and not is_selected:
+                text_color = QColor(scm_colors.get(status, '#ffffff'))
+            
+            text_rect = QRect(text_x, row_rect.top(), row_rect.width() - text_x - 30, row_rect.height())
             
             painter.setFont(option.font)
             painter.setPen(text_color)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+            
+            # 7. Draw status letter or dot on the right
+            if status:
+                right_rect = QRect(view.viewport().width() - 25, row_rect.top(), 20, row_rect.height())
+                painter.setOpacity(0.8)
+                if status == 'MOD_CHILD':
+                    # Draw a small dot for folders with modified children
+                    painter.setBrush(QColor(scm_colors[status]))
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.drawEllipse(right_rect.center(), 3, 3)
+                else:
+                    # Draw the status char
+                    painter.drawText(right_rect, Qt.AlignmentFlag.AlignCenter, status)
+                painter.setOpacity(1.0)
         
         painter.restore()
 
@@ -602,6 +646,17 @@ class ProjectSection(QWidget):
         self.creating_parent = None
         self.editing_index = None
         
+        # SCM Status indicators
+        self.scm_status = {} # abs_path -> status_char
+        from app.core.git_manager import GitManager
+        self.git = GitManager()
+        self.git.detect_repo(self._root_path)
+        
+        self.scm_timer = QTimer(self)
+        self.scm_timer.timeout.connect(self._refresh_scm_status)
+        self.scm_timer.start(5000) # Refresh every 5 seconds
+        QTimer.singleShot(500, self._refresh_scm_status) # Initial refresh
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1045,6 +1100,25 @@ class ProjectSection(QWidget):
         self.inline_editor.setGeometry(icon_x, row_y, width, 22)
         self.inline_editor.show()
         self.inline_editor.setFocus()
+
+    def _refresh_scm_status(self):
+        """Fetch git status and update the explorer visual state."""
+        if not self.git.repo_root:
+            if not self.git.detect_repo(self._root_path):
+                return
+        
+        try:
+            status_list = self.git.status()
+            new_status = {}
+            for item in status_list:
+                new_status[os.path.normpath(item.abs_path)] = item.display_status
+            
+            if new_status != self.scm_status:
+                self.scm_status = new_status
+                # Request repaint of the entire tree to show new status colors/letters
+                self.tree.viewport().update()
+        except Exception:
+            pass
 
     def _cancel_inline_creation(self):
         old_parent = self.creating_parent

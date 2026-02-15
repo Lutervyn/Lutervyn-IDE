@@ -893,7 +893,7 @@ class MarkdownPreviewWidget(BasePreviewWidget):
         # ── Live update: re-render when editor text changes ──
         self._update_timer = QTimer()
         self._update_timer.setSingleShot(True)
-        self._update_timer.setInterval(400)  # debounce 400ms
+        self._update_timer.setInterval(600)  # debounce 600ms
         self._update_timer.timeout.connect(self._on_editor_changed)
         if self.editor:
             self.editor.textChanged.connect(self._schedule_update)
