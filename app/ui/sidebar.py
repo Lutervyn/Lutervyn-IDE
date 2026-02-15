@@ -1101,6 +1101,8 @@ class ProjectSection(QWidget):
         self.inline_editor.show()
         self.inline_editor.setFocus()
 
+    scm_count_changed = pyqtSignal(int)
+
     def _refresh_scm_status(self):
         """Fetch git status and update the explorer visual state."""
         if not self.git.repo_root:
@@ -1112,6 +1114,9 @@ class ProjectSection(QWidget):
             new_status = {}
             for item in status_list:
                 new_status[os.path.normpath(item.abs_path)] = item.display_status
+            
+            # Emit total changed files count
+            self.scm_count_changed.emit(len(status_list))
             
             if new_status != self.scm_status:
                 self.scm_status = new_status
@@ -1280,6 +1285,8 @@ class FileExplorerPanel(QWidget):
         self.projects.clear()
         self.add_root_folder(path)
 
+    scm_count_changed = pyqtSignal(int)
+
     def add_root_folder(self, path: str):
         if not path or not os.path.exists(path): return
         # Avoid duplicates
@@ -1294,11 +1301,23 @@ class FileExplorerPanel(QWidget):
         project.workspace_action_requested.connect(self.workspace_action_requested.emit)
         project.file_close_requested.connect(self.file_close_requested.emit)
         project.expansion_changed.connect(self._update_projects_stretch)
+        project.scm_count_changed.connect(self._on_scm_count_changed)
         
         self.projects.append(project)
         # Insert before the stretch (which is the last item)
         self.projects_layout.insertWidget(self.projects_layout.count() - 1, project)
         self._update_projects_stretch()
+
+    def _on_scm_count_changed(self):
+        """Aggregate SCM counts from all projects and emit total."""
+        total = 0
+        for p in self.projects:
+            # We need to access the last emitted count from each project
+            # or ask them. Since we don't store it, let's store it on the project instance
+            # actually better to just check their cached status
+            if hasattr(p, 'scm_status'):
+                total += len(p.scm_status)
+        self.scm_count_changed.emit(total)
 
     def _update_projects_stretch(self):
         """Update stretch factors: expanded projects get stretch 1, collapsed get 0."""
@@ -1339,26 +1358,64 @@ class FileExplorerPanel(QWidget):
         count = self.editors_list.count()
         self.editors_list.setFixedHeight(min(200, count * 24 + 4) if count > 0 else 0)
 
-    def sync_open_editors(self, files: list[str]):
-        """Update the 'Open Editors' list from the main window."""
+    def sync_open_editors(self, items: list):
+        """Update the 'Open Editors' list from the main window.
+        items: list of dict {'name': str, 'path': str|None, 'index': int}
+        """
         self.editors_list.clear()
         from PyQt6.QtWidgets import QListWidgetItem
         from PyQt6.QtCore import QFileInfo
-        for f in files:
-            name = os.path.basename(f)
+        
+        # print(f"DEBUG: sync_open_editors called with {len(items)} items")
+        
+        for data in items:
+            if isinstance(data, dict):
+                name = data.get('name', 'Untitled')
+                path = data.get('path')
+                index = data.get('index')
+            elif isinstance(data, str):
+                # Caller passed plain file paths
+                name = os.path.basename(data) if data else 'Untitled'
+                path = data
+                index = None
+            else:
+                continue
+            
             item = QListWidgetItem(name)
-            item.setData(Qt.ItemDataRole.UserRole, f)
-            # Add icon using our provider
-            info = QFileInfo(f)
-            icon = self.icon_provider.icon(info)
-            item.setIcon(icon)
+            # Store BOTH path and index if possible
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            item.setData(Qt.ItemDataRole.UserRole + 1, index)
+            
+            # Choose Icon
+            if path:
+                info = QFileInfo(path)
+                icon = self.icon_provider.icon(info)
+            else:
+                # Fallback for untitled or special widgets
+                if "Untitled" in name:
+                    # Look for file.txt icon
+                    icon = self.icon_provider.icon(QFileInfo("file.txt"))
+                else:
+                    # Maybe it's Welcome or something else
+                    icon = self.theme.get('icon_settings') # or some generic icon
+                    
+            if icon:
+                item.setIcon(icon)
+                
             self.editors_list.addItem(item)
+            
         self._update_editor_list_height()
 
     def _on_editor_item_clicked(self, item):
         file_path = item.data(Qt.ItemDataRole.UserRole)
-        if file_path:
+        index = item.data(Qt.ItemDataRole.UserRole + 1)
+        
+        # If we have a path and it exists, emit that
+        if file_path and os.path.exists(file_path):
             self.file_opened.emit(file_path)
+        else:
+            # Fallback to switching by name (handled in MainWindow._open_file)
+            self.file_opened.emit(item.text())
 
     def highlight_file(self, path):
         """Route highlight request to the correct project section."""
@@ -1373,13 +1430,22 @@ class FileExplorerPanel(QWidget):
 
 
 class SearchPanel(QWidget):
-    """Search across files panel."""
+    """Search across files panel with real-time search and replace."""
 
-    search_requested = pyqtSignal(str)
+    file_opened = pyqtSignal(str, int)  # path, line_number
+    file_reloaded = pyqtSignal(str)  # path - signals that a file was modified and should reload
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
         self.theme = theme
+        self.workspace_root = None
+        self.search_results = []  # List of (file_path, line_num, line_text, match_start, match_end)
+        self.current_match_index = -1
+        
+        # Debounce timer for search-as-you-type
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self._perform_search)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1388,41 +1454,504 @@ class SearchPanel(QWidget):
         self.header = SidebarHeader("Search", theme, self)
         layout.addWidget(self.header)
 
-        # Search input
+        # Search input container
         search_container = QWidget()
         search_layout = QVBoxLayout(search_container)
         search_layout.setContentsMargins(12, 8, 12, 8)
+        search_layout.setSpacing(6)
 
+        # Search input with toggle buttons
+        search_row = QHBoxLayout()
+        search_row.setSpacing(4)
+        
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search")
+        self.search_input.setFont(QFont("Segoe UI", 9))
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {theme['input_bg']};
                 color: {theme['input_fg']};
                 border: 1px solid {theme['input_border']};
                 padding: 5px 8px;
-                font-size: 13px;
+                border-radius: 3px;
             }}
             QLineEdit:focus {{
                 border-color: {theme['input_border_focus']};
             }}
         """)
-        self.search_input.returnPressed.connect(
-            lambda: self.search_requested.emit(self.search_input.text()))
-        search_layout.addWidget(self.search_input)
+        self.search_input.textChanged.connect(self._on_search_text_changed)
+        search_row.addWidget(self.search_input)
 
+        # Toggle buttons (Match Case, Regex, Whole Word)
+        self.case_btn = self._create_toggle_button("Aa", "Match Case")
+        self.regex_btn = self._create_toggle_button(".*", "Use Regular Expression")
+        self.word_btn = self._create_toggle_button("Ab", "Match Whole Word")
+        
+        search_row.addWidget(self.case_btn)
+        search_row.addWidget(self.regex_btn)
+        search_row.addWidget(self.word_btn)
+        
+        search_layout.addLayout(search_row)
+
+        # Replace input with action buttons
+        replace_row = QHBoxLayout()
+        replace_row.setSpacing(4)
+        
         self.replace_input = QLineEdit()
         self.replace_input.setPlaceholderText("Replace")
+        self.replace_input.setFont(QFont("Segoe UI", 9))
         self.replace_input.setStyleSheet(self.search_input.styleSheet())
-        search_layout.addWidget(self.replace_input)
+        replace_row.addWidget(self.replace_input)
 
+        # Replace action buttons
+        self.replace_btn = self._create_action_button("Replace", self._replace_current)
+        self.replace_all_btn = self._create_action_button("Replace All", self._replace_all)
+        
+        replace_row.addWidget(self.replace_btn)
+        replace_row.addWidget(self.replace_all_btn)
+        
+        search_layout.addLayout(replace_row)
+
+        # Results info and navigation
+        info_row = QHBoxLayout()
+        info_row.setSpacing(6)
+        
+        self.results_label = QLabel("")
+        self.results_label.setFont(QFont("Segoe UI", 8))
+        self.results_label.setStyleSheet(f"color: {theme['text_secondary']};")
+        info_row.addWidget(self.results_label)
+        info_row.addStretch()
+        
+        self.prev_btn = self._create_nav_button("▲", "Previous Match", self._go_to_previous)
+        self.next_btn = self._create_nav_button("▼", "Next Match", self._go_to_next)
+        
+        info_row.addWidget(self.prev_btn)
+        info_row.addWidget(self.next_btn)
+        
+        search_layout.addLayout(info_row)
+        
         layout.addWidget(search_container)
 
         # Results tree
         self.results_tree = QTreeWidget()
         self.results_tree.setHeaderHidden(True)
         self.results_tree.setIndentation(16)
+        self.results_tree.setFont(QFont("Segoe UI", 9))
+        self.results_tree.itemClicked.connect(self._on_result_clicked)
+        self.results_tree.setStyleSheet(f"""
+            QTreeWidget {{
+                background-color: {theme['sidebar_bg']};
+                color: {theme['sidebar_fg']};
+                border: none;
+                outline: none;
+            }}
+            QTreeWidget::item {{
+                padding: 2px;
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {theme['bg_hover']};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {theme['bg_selection']};
+            }}
+        """)
         layout.addWidget(self.results_tree)
+
+    def _create_toggle_button(self, text, tooltip):
+        btn = QPushButton(text)
+        btn.setToolTip(tooltip)
+        btn.setCheckable(True)
+        btn.setFixedSize(24, 24)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFont(QFont("Segoe UI", 8))
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {self.theme['input_bg']};
+                border: 1px solid {self.theme['input_border']};
+                border-radius: 3px;
+                color: {self.theme['text_secondary']};
+            }}
+            QPushButton:hover {{
+                background: {self.theme['bg_hover']};
+            }}
+            QPushButton:checked {{
+                background: {self.theme['accent']};
+                color: {self.theme['accent_fg']};
+                border-color: {self.theme['accent']};
+            }}
+        """)
+        btn.clicked.connect(self._on_search_text_changed)
+        return btn
+
+    def _create_action_button(self, text, callback):
+        btn = QPushButton(text)
+        btn.setFont(QFont("Segoe UI", 8))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedHeight(24)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {self.theme['input_bg']};
+                border: 1px solid {self.theme['input_border']};
+                border-radius: 3px;
+                color: {self.theme['sidebar_fg']};
+                padding: 0 8px;
+            }}
+            QPushButton:hover {{
+                background: {self.theme['bg_hover']};
+            }}
+            QPushButton:pressed {{
+                background: {self.theme['bg_selection']};
+            }}
+        """)
+        btn.clicked.connect(callback)
+        return btn
+
+    def _create_nav_button(self, text, tooltip, callback):
+        btn = QPushButton(text)
+        btn.setToolTip(tooltip)
+        btn.setFixedSize(20, 20)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFont(QFont("Segoe UI", 8))
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid {self.theme['input_border']};
+                border-radius: 3px;
+                color: {self.theme['sidebar_fg']};
+            }}
+            QPushButton:hover {{
+                background: {self.theme['bg_hover']};
+            }}
+        """)
+        btn.clicked.connect(callback)
+        return btn
+
+    def set_workspace_root(self, path):
+        """Set the root directory for search operations."""
+        self.workspace_root = path
+
+    def _on_search_text_changed(self):
+        """Debounce search trigger."""
+        self.search_timer.stop()
+        query = self.search_input.text().strip()
+        if query:
+            self.search_timer.start(300)  # 300ms debounce
+        else:
+            self.results_tree.clear()
+            self.results_label.setText("")
+            self.search_results = []
+
+    def _perform_search(self):
+        """Execute file search using grep/ripgrep or Python fallback."""
+        query = self.search_input.text().strip()
+        if not query or not self.workspace_root:
+            return
+
+        self.results_tree.clear()
+        self.search_results = []
+        
+        # Try ripgrep first
+        use_rg = False
+        try:
+            subprocess.run(["rg", "--version"], capture_output=True, check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            use_rg = True
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pass
+
+        if use_rg:
+            try:
+                cmd = ["rg", "--line-number", "--column", "--no-heading", "--color=never"]
+                if self.case_btn.isChecked():
+                    cmd.append("--case-sensitive")
+                else:
+                    cmd.append("--ignore-case")
+                if self.word_btn.isChecked():
+                    cmd.append("--word-regexp")
+                if not self.regex_btn.isChecked():
+                    cmd.append("--fixed-strings")
+                cmd.append(query)
+                cmd.append(self.workspace_root)
+                
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                
+                self._parse_ripgrep_results(result.stdout, query)
+                return
+            except Exception as e:
+                # Fall through to Python search
+                pass
+        
+        # Python-based fallback search
+        self._python_search(query)
+
+    def _python_search(self, query):
+        """Pure Python file search (fallback when grep/ripgrep unavailable)."""
+        if not self.workspace_root:
+            return
+        
+        import re
+        
+        # Compile search pattern
+        if self.regex_btn.isChecked():
+            try:
+                flags = 0 if self.case_btn.isChecked() else re.IGNORECASE
+                pattern = re.compile(query, flags)
+            except re.error:
+                self.results_label.setText("Invalid regex pattern")
+                return
+        else:
+            # Fixed string search
+            if self.case_btn.isChecked():
+                if self.word_btn.isChecked():
+                    pattern = re.compile(r'\b' + re.escape(query) + r'\b')
+                else:
+                    search_str = query
+                    pattern = None
+            else:
+                if self.word_btn.isChecked():
+                    pattern = re.compile(r'\b' + re.escape(query) + r'\b', re.IGNORECASE)
+                else:
+                    search_str = query.lower()
+                    pattern = None
+        
+        file_results = {}
+        binary_extensions = {'.exe', '.dll', '.so', '.dylib', '.bin', '.pyc', '.pyo', 
+                            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', 
+                            '.mp3', '.mp4', '.avi', '.mov', '.pdf', '.zip', '.tar', '.gz'}
+        
+        try:
+            for root, dirs, files in os.walk(self.workspace_root):
+                # Skip common ignore directories
+                dirs[:] = [d for d in dirs if d not in {'.git', '.svn', '__pycache__', 'node_modules', '.vscode', '.idea'}]
+                
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    _, ext = os.path.splitext(file)
+                    
+                    # Skip binary files
+                    if ext.lower() in binary_extensions:
+                        continue
+                    
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            for line_num, line in enumerate(f, 1):
+                                line_text = line.rstrip('\n\r')
+                                
+                                # Perform search
+                                match = False
+                                col = 0
+                                
+                                if pattern:
+                                    m = pattern.search(line_text)
+                                    if m:
+                                        match = True
+                                        col = m.start()
+                                else:
+                                    # Simple string search
+                                    if self.case_btn.isChecked():
+                                        idx = line_text.find(search_str)
+                                    else:
+                                        idx = line_text.lower().find(search_str)
+                                    
+                                    if idx >= 0:
+                                        match = True
+                                        col = idx
+                                
+                                if match:
+                                    file_path_norm = os.path.normpath(file_path)
+                                    if file_path_norm not in file_results:
+                                        file_results[file_path_norm] = []
+                                    file_results[file_path_norm].append((line_num, line_text, col))
+                                    self.search_results.append((file_path_norm, line_num, line_text, col))
+                    
+                    except (PermissionError, UnicodeDecodeError, OSError):
+                        continue
+            
+            # Populate tree
+            total_matches = len(self.search_results)
+            for file_path, matches in file_results.items():
+                rel_path = os.path.relpath(file_path, self.workspace_root)
+                
+                file_item = QTreeWidgetItem([f"{rel_path} ({len(matches)})"])
+                file_item.setData(0, Qt.ItemDataRole.UserRole, file_path)
+                self.results_tree.addTopLevelItem(file_item)
+                
+                for line_num, text, col in matches:
+                    match_item = QTreeWidgetItem([f"  {line_num}: {text}"])
+                    match_item.setData(0, Qt.ItemDataRole.UserRole, (file_path, line_num))
+                    file_item.addChild(match_item)
+                
+                file_item.setExpanded(True)
+
+            self.results_label.setText(f"{total_matches} result{'s' if total_matches != 1 else ''} in {len(file_results)} file{'s' if len(file_results) != 1 else ''}")
+            self.current_match_index = 0 if total_matches > 0 else -1
+
+        except Exception as e:
+            self.results_label.setText(f"Search error: {str(e)}")
+
+    def _parse_ripgrep_results(self, stdout, query):
+        """Parse ripgrep output and populate results."""
+        file_results = {}
+        for line in stdout.splitlines():
+            # ripgrep format: file:line:column:text
+            parts = line.split(':', 3)
+            if len(parts) >= 4:
+                file_path, line_num, col_num, text = parts
+                line_num = int(line_num)
+                col_num = int(col_num)
+                
+                file_path = os.path.normpath(file_path)
+                if file_path not in file_results:
+                    file_results[file_path] = []
+                file_results[file_path].append((line_num, text.strip(), col_num))
+                self.search_results.append((file_path, line_num, text.strip(), col_num))
+
+        # Populate tree
+        total_matches = len(self.search_results)
+        for file_path, matches in file_results.items():
+            rel_path = os.path.relpath(file_path, self.workspace_root)
+            
+            file_item = QTreeWidgetItem([f"{rel_path} ({len(matches)})"])
+            file_item.setData(0, Qt.ItemDataRole.UserRole, file_path)
+            self.results_tree.addTopLevelItem(file_item)
+            
+            for line_num, text, col in matches:
+                match_item = QTreeWidgetItem([f"  {line_num}: {text}"])
+                match_item.setData(0, Qt.ItemDataRole.UserRole, (file_path, line_num))
+                file_item.addChild(match_item)
+            
+            file_item.setExpanded(True)
+
+        self.results_label.setText(f"{total_matches} result{'s' if total_matches != 1 else ''} in {len(file_results)} file{'s' if len(file_results) != 1 else ''}")
+        self.current_match_index = 0 if total_matches > 0 else -1
+
+    def _on_result_clicked(self, item, column):
+        """Open file at match location."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(data, tuple):
+            file_path, line_num = data
+            self.file_opened.emit(file_path, line_num)
+
+    def _go_to_previous(self):
+        """Navigate to previous match."""
+        if not self.search_results:
+            return
+        self.current_match_index = (self.current_match_index - 1) % len(self.search_results)
+        file_path, line_num, _, _ = self.search_results[self.current_match_index]
+        self.file_opened.emit(file_path, line_num)
+
+    def _go_to_next(self):
+        """Navigate to next match."""
+        if not self.search_results:
+            return
+        self.current_match_index = (self.current_match_index + 1) % len(self.search_results)
+        file_path, line_num, _, _ = self.search_results[self.current_match_index]
+        self.file_opened.emit(file_path, line_num)
+
+    def _replace_current(self):
+        """Replace the current match."""
+        if self.current_match_index < 0 or not self.search_results:
+            return
+        
+        file_path, line_num, line_text, col = self.search_results[self.current_match_index]
+        replace_text = self.replace_input.text()
+        search_text = self.search_input.text()
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            if 0 < line_num <= len(lines):
+                line = lines[line_num - 1]
+                # Perform replacement
+                if self.regex_btn.isChecked():
+                    import re
+                    flags = 0 if self.case_btn.isChecked() else re.IGNORECASE
+                    lines[line_num - 1] = re.sub(search_text, replace_text, line, count=1, flags=flags)
+                else:
+                    # Simple text replacement
+                    if self.case_btn.isChecked():
+                        lines[line_num - 1] = line.replace(search_text, replace_text, 1)
+                    else:
+                        # Case-insensitive replace
+                        import re
+                        lines[line_num - 1] = re.sub(re.escape(search_text), replace_text, line, count=1, flags=re.IGNORECASE)
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+                    f.flush()  # Force write to disk
+                    os.fsync(f.fileno())  # Ensure it's physically written
+                
+                # Debug: Print what we're reloading
+                print(f"[SearchPanel] Replaced in file: {file_path}")
+                
+                # Emit signal to reload the file in editor if open
+                self.file_reloaded.emit(file_path)
+                
+                # Refresh search to update results (delay slightly to allow file save)
+                QTimer.singleShot(100, self._perform_search)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Replace Error", f"Could not replace: {e}")
+
+    def _replace_all(self):
+        """Replace all matches in all files."""
+        if not self.search_results:
+            return
+        
+        count = len(self.search_results)
+        reply = QMessageBox.question(
+            self, "Replace All",
+            f"Replace {count} occurrence{'s' if count != 1 else ''} across {len(set(r[0] for r in self.search_results))} file{'s' if len(set(r[0] for r in self.search_results)) != 1 else ''}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.No:
+            return
+        
+        replace_text = self.replace_input.text()
+        search_text = self.search_input.text()
+        
+        # Group by file
+        files_to_update = {}
+        for file_path, line_num, line_text, col in self.search_results:
+            if file_path not in files_to_update:
+                files_to_update[file_path] = []
+            files_to_update[file_path].append(line_num)
+        
+        try:
+            for file_path, line_nums in files_to_update.items():
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Perform replacement
+                if self.regex_btn.isChecked():
+                    import re
+                    flags = 0 if self.case_btn.isChecked() else re.IGNORECASE
+                    content = re.sub(search_text, replace_text, content, flags=flags)
+                else:
+                    if self.case_btn.isChecked():
+                        content = content.replace(search_text, replace_text)
+                    else:
+                        import re
+                        content = re.sub(re.escape(search_text), replace_text, content, flags=re.IGNORECASE)
+                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                # Emit signal to reload the file in editor if open
+                self.file_reloaded.emit(file_path)
+            
+            QMessageBox.information(self, "Replace All", f"Replaced {count} occurrence{'s' if count != 1 else ''}")
+            
+            # Refresh search to update results (delay slightly)
+            QTimer.singleShot(100, self._perform_search)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Replace All Error", f"Could not replace: {e}")
 
 
 class SCMFileItemWidget(QWidget):
@@ -2627,6 +3156,7 @@ class Sidebar(QWidget):
     find_in_folder_requested = pyqtSignal(str)
     workspace_action_requested = pyqtSignal(str, str)
     file_close_requested = pyqtSignal(str)
+    scm_count_changed = pyqtSignal(int)
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -2646,6 +3176,8 @@ class Sidebar(QWidget):
         self.explorer_panel.find_in_folder_requested.connect(self.find_in_folder_requested.emit)
         self.explorer_panel.workspace_action_requested.connect(self.workspace_action_requested.emit)
         self.explorer_panel.file_close_requested.connect(self.file_close_requested.emit)
+        self.explorer_panel.scm_count_changed.connect(self.scm_count_changed.emit)
+        
         self.search_panel = SearchPanel(theme, self)
         self.scm_panel = SourceControlPanel(theme, self)
         self.scm_panel.file_opened.connect(self.file_opened.emit)

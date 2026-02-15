@@ -164,7 +164,7 @@ class CustomTitleBar(QWidget):
                 background-color: transparent;
                 color: {theme['text_primary']};
                 font-family: 'Segoe UI';
-                font-size: 13px;
+                font-size: 11px;
             }}
             QMenuBar::item {{
                 background: transparent;

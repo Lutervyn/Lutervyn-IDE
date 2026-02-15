@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def run():
     try:
         from PyQt6.QtWidgets import QApplication
+
         app = QApplication(sys.argv)
         app.setApplicationName("Lutervyn IDE")
         app.setOrganizationName("Lutervyn")

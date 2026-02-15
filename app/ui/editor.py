@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                               QLabel, QSizePolicy, QTabBar, QPushButton,
                               QScrollBar, QFrame)
 from PyQt6.QtCore import pyqtSignal, Qt, QFileInfo, QPoint, QTimer, QRect
-from PyQt6.QtGui import QFont, QColor, QPainter, QMouseEvent, QPen, QBrush
+from PyQt6.QtGui import QFont, QColor, QPainter, QMouseEvent, QPen, QBrush, QPixmap
 from PyQt6.Qsci import (QsciScintilla, QsciLexerPython, QsciLexerJSON,
                           QsciLexerHTML, QsciLexerCSS, QsciLexerJavaScript,
                           QsciLexerMarkdown, QsciLexerBash, QsciLexerBatch,
@@ -374,95 +374,68 @@ class CodeEditorWidget(QsciScintilla):
                 lexer.setFont(font, i)
 
         # ── Markdown syntax colors — VS Code Dark+ style ──
+        # VS Code uses the same monospace editor font for Markdown source editing.
+        # Only colors change — the font stays Cascadia Code / Consolas throughout.
         if isinstance(lexer, QsciLexerMarkdown):
             t = self.theme
 
-            # Markdown base font — readable proportional font, not monospace
-            md_font = QFont("Segoe UI", 12)
-            md_font.setFamilies(["Segoe UI", "Helvetica Neue", "Arial", "sans-serif"])
-            lexer.setDefaultFont(md_font)
+            # Same monospace font as the rest of the editor (VS Code behavior)
+            lexer.setDefaultFont(font)
 
             # Default text — normal readable white
             lexer.setColor(QColor("#D4D4D4"), QsciLexerMarkdown.Default)
 
-            # Headings — blue, bold, larger sizes
-            h1_font = QFont("Segoe UI", 20, QFont.Weight.Bold)
-            h2_font = QFont("Segoe UI", 17, QFont.Weight.Bold)
-            h3_font = QFont("Segoe UI", 15, QFont.Weight.Bold)
-            h4_font = QFont("Segoe UI", 13, QFont.Weight.Bold)
-            h5_font = QFont("Segoe UI", 12, QFont.Weight.Bold)
-            h6_font = QFont("Segoe UI", 11, QFont.Weight.Bold)
+            # Headings — blue, bold
             heading_color = QColor("#569CD6")
-            for h_style, h_font in [
-                (QsciLexerMarkdown.Header1, h1_font),
-                (QsciLexerMarkdown.Header2, h2_font),
-                (QsciLexerMarkdown.Header3, h3_font),
-                (QsciLexerMarkdown.Header4, h4_font),
-                (QsciLexerMarkdown.Header5, h5_font),
-                (QsciLexerMarkdown.Header6, h6_font),
-            ]:
+            bold_font = QFont(font)
+            bold_font.setBold(True)
+            for h_style in [QsciLexerMarkdown.Header1, QsciLexerMarkdown.Header2,
+                            QsciLexerMarkdown.Header3, QsciLexerMarkdown.Header4,
+                            QsciLexerMarkdown.Header5, QsciLexerMarkdown.Header6]:
                 lexer.setColor(heading_color, h_style)
-                lexer.setFont(h_font, h_style)
+                lexer.setFont(bold_font, h_style)
 
             # Bold — orange, bold
-            md_bold = QFont("Segoe UI", 12, QFont.Weight.Bold)
             lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.StrongEmphasisAsterisks)
-            lexer.setFont(md_bold, QsciLexerMarkdown.StrongEmphasisAsterisks)
+            lexer.setFont(bold_font, QsciLexerMarkdown.StrongEmphasisAsterisks)
             lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.StrongEmphasisUnderscores)
-            lexer.setFont(md_bold, QsciLexerMarkdown.StrongEmphasisUnderscores)
+            lexer.setFont(bold_font, QsciLexerMarkdown.StrongEmphasisUnderscores)
 
             # Italic — light green, italic
-            md_italic = QFont("Segoe UI", 12)
-            md_italic.setItalic(True)
+            italic_font = QFont(font)
+            italic_font.setItalic(True)
             lexer.setColor(QColor("#B5CEA8"), QsciLexerMarkdown.EmphasisAsterisks)
-            lexer.setFont(md_italic, QsciLexerMarkdown.EmphasisAsterisks)
+            lexer.setFont(italic_font, QsciLexerMarkdown.EmphasisAsterisks)
             lexer.setColor(QColor("#B5CEA8"), QsciLexerMarkdown.EmphasisUnderscores)
-            lexer.setFont(md_italic, QsciLexerMarkdown.EmphasisUnderscores)
+            lexer.setFont(italic_font, QsciLexerMarkdown.EmphasisUnderscores)
 
             # Links — teal
             lexer.setColor(QColor("#4EC9B0"), QsciLexerMarkdown.Link)
-            lexer.setFont(md_font, QsciLexerMarkdown.Link)
 
-            # Code (backticks) — monospace for code, orange
-            code_font = QFont("Cascadia Code", 11)
-            code_font.setFamilies(["Cascadia Code", "Consolas", "Fira Code", "Courier New", "monospace"])
+            # Code (backticks) — orange
             lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.CodeBackticks)
-            lexer.setFont(code_font, QsciLexerMarkdown.CodeBackticks)
             lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.CodeDoubleBackticks)
-            lexer.setFont(code_font, QsciLexerMarkdown.CodeDoubleBackticks)
             lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.CodeBlock)
-            lexer.setFont(code_font, QsciLexerMarkdown.CodeBlock)
 
             # Lists — purple
             lexer.setColor(QColor("#C586C0"), QsciLexerMarkdown.UnorderedListItem)
-            lexer.setFont(md_font, QsciLexerMarkdown.UnorderedListItem)
             lexer.setColor(QColor("#C586C0"), QsciLexerMarkdown.OrderedListItem)
-            lexer.setFont(md_font, QsciLexerMarkdown.OrderedListItem)
 
-            # Block quotes — green
+            # Block quotes — green, italic
             lexer.setColor(QColor("#6A9955"), QsciLexerMarkdown.BlockQuote)
-            md_italic_quote = QFont("Segoe UI", 12)
-            md_italic_quote.setItalic(True)
-            lexer.setFont(md_italic_quote, QsciLexerMarkdown.BlockQuote)
+            lexer.setFont(italic_font, QsciLexerMarkdown.BlockQuote)
 
             # Strikeout — dimmed
             lexer.setColor(QColor("#636366"), QsciLexerMarkdown.StrikeOut)
-            lexer.setFont(md_font, QsciLexerMarkdown.StrikeOut)
 
             # Horizontal rule — dimmed
             lexer.setColor(QColor("#636366"), QsciLexerMarkdown.HorizontalRule)
-            lexer.setFont(md_font, QsciLexerMarkdown.HorizontalRule)
 
             # Special / Prechar — muted
             lexer.setColor(QColor("#808080"), QsciLexerMarkdown.Special)
-            lexer.setFont(md_font, QsciLexerMarkdown.Special)
             lexer.setColor(QColor("#808080"), QsciLexerMarkdown.Prechar)
-            lexer.setFont(md_font, QsciLexerMarkdown.Prechar)
 
-            # Default style font
-            lexer.setFont(md_font, QsciLexerMarkdown.Default)
-
-            # Set paper (background) for all Markdown styles
+            # Set paper (background) and font for all Markdown styles
             for i in range(25):
                 lexer.setPaper(QColor(t['editor_bg']), i)
 
@@ -491,11 +464,46 @@ class CodeEditorWidget(QsciScintilla):
         self._is_modified = modified
 
     def save_file(self):
-        """Save the current file."""
-        if self.file_path:
+        """Save the current file. Returns True if saved, False if cancelled or error."""
+        if self.file_path and os.path.isabs(self.file_path):
             try:
                 with open(self.file_path, "w", encoding="utf-8") as f:
                     f.write(self.text())
+                self.setModified(False)
+                return True
+            except Exception as e:
+                print(f"Error saving: {e}")
+                return False
+        
+        # No path? We need to prompt. 
+        # But wait, better to let the parent (EditorTabs/MainWindow) handle the UI.
+        # However, for consistency, let's implement a robust local fallback.
+        from PyQt6.QtWidgets import QFileDialog
+        import os
+        
+        # Try to find a sane directory
+        cwd = os.getcwd()
+        # If we can find the MainWindow via parent...
+        suggested_name = "untitled.py"
+        
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self, "Save File", os.path.join(cwd, suggested_name),
+            "Python Files (*.py);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                file_path = os.path.abspath(os.path.normpath(file_path))
+                if "." not in os.path.basename(file_path) and "Python" in selected_filter:
+                    file_path += ".py"
+                    
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(self.text())
+                
+                # We need to update the tab too, but we don't have direct access to EditorTabs here easily
+                # without emitting a signal. Let's assume the caller will handle renaming.
+                # Actually, self.file_path is used by the tab.
+                self.file_path = file_path
                 self.setModified(False)
                 return True
             except Exception as e:
@@ -773,61 +781,51 @@ class WelcomeTab(QWidget):
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
         self.theme = theme
+        self._logo_pixmap = None
 
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        title = QLabel("Lutervyn IDE")
-        title.setFont(QFont("Segoe UI", 28, QFont.Weight.Light))
-        title.setStyleSheet(f"color: {theme['text_secondary']};")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-
-        subtitle = QLabel("Python Development Environment")
-        subtitle.setFont(QFont("Segoe UI", 14))
-        subtitle.setStyleSheet(f"color: {theme['text_disabled']};")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
-
-        spacer = QLabel("")
-        spacer.setFixedHeight(30)
-        layout.addWidget(spacer)
-
-        shortcuts = [
-            ("Ctrl+O", "Open File"),
-            ("Ctrl+N", "New File"),
-            ("Ctrl+K Ctrl+O", "Open Folder"),
-            ("Ctrl+Shift+F", "Search Files"),
-            ("Ctrl+`", "Toggle Terminal"),
-            ("F5", "Run Python File"),
-        ]
-
-        for key, desc in shortcuts:
-            row = QHBoxLayout()
-            row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            key_label = QLabel(key)
-            key_label.setFont(QFont("Cascadia Code", 12))
-            key_label.setStyleSheet(f"""
-                color: {theme['accent']};
-                background-color: {theme['bg_medium']};
-                padding: 3px 10px;
-                border-radius: 3px;
-            """)
-            key_label.setFixedWidth(180)
-            key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            desc_label = QLabel(desc)
-            desc_label.setFont(QFont("Segoe UI", 12))
-            desc_label.setStyleSheet(f"color: {theme['text_secondary']};")
-            desc_label.setFixedWidth(180)
-
-            row.addWidget(key_label)
-            row.addWidget(desc_label)
-            layout.addLayout(row)
+        # Load the logo pixmap (we'll paint it ourselves to fill the panel)
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), 'assets', 'logo.png')
+        if os.path.exists(logo_path):
+            self._logo_pixmap = QPixmap(logo_path)
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(self.theme['editor_bg']))
+        bg = QColor(self.theme['editor_bg'])
+        p.fillRect(self.rect(), bg)
+
+        if self._logo_pixmap and not self._logo_pixmap.isNull():
+            w = self.width()
+            h = self.height()
+
+            # Scale logo to ~40% of the smaller dimension, centered
+            logo_size = int(min(w, h) * 0.40)
+            logo_size = max(logo_size, 128)  # at least 128px
+            scaled = self._logo_pixmap.scaled(
+                logo_size, logo_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+
+            # Draw logo centered, shifted up a bit
+            lx = (w - scaled.width()) // 2
+            ly = (h - scaled.height()) // 2 - 30
+            p.setOpacity(0.15)
+            p.drawPixmap(lx, ly, scaled)
+
+            # Draw title text below logo
+            p.setOpacity(1.0)
+            title_font = QFont("Segoe UI", 14, QFont.Weight.DemiBold)
+            p.setFont(title_font)
+            p.setPen(QColor(self.theme['text_disabled']))
+            text_y = ly + scaled.height() + 24
+            p.drawText(QRect(0, text_y, w, 30),
+                       Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                       "Lutervyn IDE")
+
         p.end()
 
 
@@ -858,6 +856,42 @@ class EditorTabs(QWidget):
         # Show welcome tab initially
         welcome = WelcomeTab(theme, self)
         self.tabs.addTab(welcome, "Welcome")
+        
+        self._untitled_count = 0
+
+    def new_file(self, language: str = None):
+        """Create a new untitled file."""
+        self._untitled_count += 1
+        name = f"Untitled-{self._untitled_count}"
+        
+        # Remove welcome tab if it exists
+        if self.tabs.count() == 1 and isinstance(self.tabs.widget(0), WelcomeTab):
+            self.tabs.removeTab(0)
+            
+        # Create editor with no path
+        editor = CodeEditorWidget(None, self.theme, self)
+        wrapper = EditorWithMinimap(editor, self.theme, self)
+        
+        # Listen for modifications
+        editor.modificationChanged.connect(
+            lambda mod, fp=None: self._on_modified(fp, mod, editor))
+            
+        # Apply stored extension theme
+        self._apply_stored_extension_theme(editor, wrapper)
+        
+        # Set language if provided (simple mapping for now)
+        if language:
+            from PyQt6.Qsci import QsciLexerPython, QsciLexerMarkdown, QsciLexerJSON
+            if language == "python":
+                editor.setLexer(QsciLexerPython(editor))
+            elif language == "markdown":
+                editor.setLexer(QsciLexerMarkdown(editor))
+            elif language == "json":
+                editor.setLexer(QsciLexerJSON(editor))
+        
+        index = self.tabs.addTab(wrapper, name)
+        self.tabs.setCurrentIndex(index)
+        self.tabs_changed.emit()
 
     def open_file(self, file_path: str):
         """Open a file in a new tab, or switch to it if already open."""
@@ -889,11 +923,13 @@ class EditorTabs(QWidget):
         elif ext in ['.md', '.markdown']:
             # Markdown split preview: editor on left, rendered HTML on right
             editor = CodeEditorWidget(file_path, self.theme, self)
+            # Re-enable vertical scrollbar for Markdown (no minimap in split view)
+            editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             md_preview = MarkdownPreviewWidget(file_path, self.theme, editor_widget=editor, parent=self)
             wrapper = md_preview
             # Listen for modifications
             editor.modificationChanged.connect(
-                lambda mod, fp=file_path: self._on_modified(fp, mod))
+                lambda mod, fp=file_path: self._on_modified(fp, mod, editor))
             # Apply stored extension theme
             self._apply_stored_extension_theme(editor, None)
         else:
@@ -902,7 +938,7 @@ class EditorTabs(QWidget):
             wrapper = EditorWithMinimap(editor, self.theme, self)
             # Listen for modifications (only for code editors)
             editor.modificationChanged.connect(
-                lambda mod, fp=file_path: self._on_modified(fp, mod))
+                lambda mod, fp=file_path: self._on_modified(fp, mod, editor))
 
             # Apply stored extension theme (if user applied one before opening this file)
             self._apply_stored_extension_theme(editor, wrapper)
@@ -943,18 +979,68 @@ class EditorTabs(QWidget):
                 apply_vscode_theme_to_editor(minimap, theme_colors)
         return count
 
-    def _on_modified(self, file_path: str, modified: bool):
-        if file_path not in self._open_files: return
-        index = self._open_files[file_path]
-        tab_name = os.path.basename(file_path)
-        if modified:
-            self.tabs.setTabText(index, f"● {tab_name}")
-        else:
-            self.tabs.setTabText(index, tab_name)
-        self.file_modified.emit(file_path, modified)
+    def _on_modified(self, file_path: str, modified: bool, editor_widget=None):
+        index = -1
+        tab_name = ""
+        
+        if file_path and file_path in self._open_files:
+            index = self._open_files[file_path]
+            tab_name = os.path.basename(file_path)
+        elif editor_widget:
+            # Fallback: find tab containing this editor (for untitled files)
+            for i in range(self.tabs.count()):
+                w = self.tabs.widget(i)
+                if hasattr(w, 'editor') and w.editor == editor_widget:
+                    index = i
+                    tab_name = self.tabs.tabText(i).replace("● ", "")
+                    break
+        
+        if index != -1:
+            if modified:
+                self.tabs.setTabText(index, f"● {tab_name}")
+            else:
+                self.tabs.setTabText(index, tab_name)
+        
+        if file_path:
+            self.file_modified.emit(file_path, modified)
 
     def _close_tab(self, index: int):
         widget = self.tabs.widget(index)
+        
+        # Check for unsaved changes
+        editor = None
+        if isinstance(widget, EditorWithMinimap):
+            editor = widget.editor
+        elif isinstance(widget, MarkdownPreviewWidget):
+            editor = widget.editor
+        elif isinstance(widget, CodeEditorWidget):
+            editor = widget
+            
+        if editor and hasattr(editor, "isModified") and editor.isModified():
+            from PyQt6.QtWidgets import QMessageBox
+            
+            # Switch to this tab first so user sees what they are closing
+            self.tabs.setCurrentIndex(index)
+            
+            tab_name = self.tabs.tabText(index).replace("● ", "")
+            reply = QMessageBox.question(
+                self, "Save Changes?",
+                f"Do you want to save the changes you made to {tab_name}?\n\nYour changes will be lost if you don't save them.",
+                QMessageBox.StandardButton.Save | 
+                QMessageBox.StandardButton.Discard | 
+                QMessageBox.StandardButton.Cancel
+            )
+            
+            if reply == QMessageBox.StandardButton.Save:
+                # Use the robust save_file() method we just improved
+                if not editor.save_file():
+                    # Save failed or cancelled -> abort close
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                # Cancel -> abort close
+                return
+            # If Discard, proceed
+        
         path = None
         if isinstance(widget, EditorWithMinimap):
             path = widget.editor.file_path
@@ -975,10 +1061,11 @@ class EditorTabs(QWidget):
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
             p = None
-            if isinstance(w, EditorWithMinimap):
-                p = w.editor.file_path
-            elif hasattr(w, "file_path"):
+            if hasattr(w, "file_path"):
                 p = w.file_path
+            elif isinstance(w, EditorWithMinimap):
+                if w.editor.file_path:
+                    p = os.path.normpath(w.editor.file_path)
             if p:
                 self._open_files[p] = i
 
@@ -998,7 +1085,8 @@ class EditorTabs(QWidget):
             if hasattr(widget, 'file_path'):
                 p = os.path.normpath(widget.file_path)
             elif isinstance(widget, EditorWithMinimap):
-                p = os.path.normpath(widget.editor.file_path)
+                if widget.editor.file_path:
+                    p = os.path.normpath(widget.editor.file_path)
                 
             if p == file_path:
                 self._close_tab(i)
@@ -1010,6 +1098,26 @@ class EditorTabs(QWidget):
         if editor:
             return editor.save_file()
         return False
+        
+    def set_current_file_path(self, new_path: str):
+        """Update the path of the current editor (e.g. after Save As)."""
+        editor = self.get_current_editor()
+        if editor:
+            # Remove old path from _open_files if it existed
+            if editor.file_path and editor.file_path in self._open_files:
+                self._open_files.pop(editor.file_path)
+
+            editor.file_path = new_path
+            index = self.tabs.currentIndex()
+            self.tabs.setTabText(index, os.path.basename(new_path))
+            self._open_files[new_path] = index
+            # setup lexer based on new extension
+            editor._setup_lexer(new_path)
+            # Emit modification signal to update UI (e.g. remove '●')
+            self._on_modified(new_path, False, editor)
+            # Trigger sync
+            self.tabs_changed.emit()
+
 
     def get_current_editor(self) -> CodeEditorWidget | None:
         widget = self.tabs.currentWidget()

@@ -263,15 +263,17 @@ def build_stylesheet(theme: dict) -> str:
         background-color: {theme['bg_medium']};
         color: {theme['text_primary']};
         border: 1px solid {theme['border_light']};
-        border-radius: 10px;
-        padding: 6px;
+        border-radius: 6px;
+        padding: 4px;
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 11px; /* Reduced font size */
     }}
     QMenu::item {{
         background-color: transparent;
         color: {theme['text_primary']};
-        padding: 6px 30px 6px 10px;
-        border-radius: 6px;
-        margin: 2px 4px;
+        padding: 4px 24px 4px 8px; /* Reduced vertical padding */
+        border-radius: 4px;
+        margin: 1px 2px; /* Reduced margin */
     }}
     QMenu::item:selected {{
         background-color: {theme['bg_active']};
@@ -283,7 +285,7 @@ def build_stylesheet(theme: dict) -> str:
     QMenu::separator {{
         height: 1px;
         background-color: {theme['border']};
-        margin: 4px 10px;
+        margin: 2px 6px; /* Reduced separator margin */
     }}
     
     /* ===== SCROLLBAR (VS Code Style — thin, only visible on hover) ===== */

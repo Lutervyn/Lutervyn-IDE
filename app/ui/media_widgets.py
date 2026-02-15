@@ -5,24 +5,13 @@ import html as html_module
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, 
                              QTreeWidget, QTreeWidgetItem, QHeaderView,
                              QHBoxLayout, QPushButton, QSlider,
-                             QFrame, QSplitter)
+                             QFrame, QSplitter, QTextBrowser)
 from PyQt6.QtCore import Qt, QSize, QUrl, pyqtSignal, QEvent, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QFont, QWheelEvent, QIcon
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtSvgWidgets import QSvgWidget
 
-# Lazy import for WebEngine — heavy dependency, may not be installed
-_QWebEngineView = None
-def _get_web_engine_view():
-    global _QWebEngineView
-    if _QWebEngineView is None:
-        try:
-            from PyQt6.QtWebEngineWidgets import QWebEngineView
-            _QWebEngineView = QWebEngineView
-        except ImportError:
-            _QWebEngineView = False  # Mark as unavailable
-    return _QWebEngineView
 
 class BasePreviewWidget(QWidget):
     """Base class for all media preview widgets."""
@@ -559,199 +548,148 @@ def _markdown_to_html(md_text: str, base_path: str = "") -> str:
 
 
 def _build_markdown_css(theme: dict) -> str:
-    """Build GitHub-flavored dark Markdown CSS using the IDE theme colors."""
+    """Build Markdown CSS compatible with QTextBrowser (Qt Rich Text / CSS 2.1 subset).
+    QTextBrowser does NOT support: *, box-sizing, nth-child, ::scrollbar, rgba(), rem, etc.
+    Stick to: color, background-color, font-family, font-size, font-weight, font-style,
+    margin, padding, border, text-decoration, text-align, white-space."""
     bg = theme.get('editor_bg', '#1e1e1e')
     fg = theme.get('editor_fg', '#d4d4d4')
     border = theme.get('border', '#3a3a3c')
     accent = theme.get('accent', '#58a6ff')
-    bg_medium = theme.get('bg_medium', '#1c1c1e')
     text_secondary = theme.get('text_secondary', '#8b949e')
 
     return f"""
-    * {{
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-    }}
-    html {{
-        height: 100%;
-        overflow-y: auto;
-        overflow-x: hidden;
-    }}
     body {{
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+        font-family: 'Segoe UI', 'Helvetica', 'Arial', sans-serif;
         font-size: 14px;
-        line-height: 1.6;
         color: {fg};
         background-color: {bg};
-        padding: 28px 32px;
-        word-wrap: break-word;
-        min-height: 100%;
-        margin: 0;
-    }}
-    h1, h2, h3, h4, h5, h6 {{
-        margin-top: 24px;
-        margin-bottom: 16px;
-        font-weight: 600;
-        line-height: 1.25;
-        color: #e6edf3;
+        margin: 24px 32px;
     }}
     h1 {{
-        font-size: 2em;
-        padding-bottom: 0.3em;
+        font-size: 28px;
+        font-weight: bold;
+        color: #e6edf3;
+        margin-top: 24px;
+        margin-bottom: 12px;
         border-bottom: 1px solid {border};
+        padding-bottom: 8px;
     }}
     h2 {{
-        font-size: 1.5em;
-        padding-bottom: 0.3em;
+        font-size: 22px;
+        font-weight: bold;
+        color: #e6edf3;
+        margin-top: 22px;
+        margin-bottom: 10px;
         border-bottom: 1px solid {border};
+        padding-bottom: 6px;
     }}
-    h3 {{ font-size: 1.25em; }}
-    h4 {{ font-size: 1em; }}
-    h5 {{ font-size: 0.875em; }}
-    h6 {{ font-size: 0.85em; color: {text_secondary}; }}
-
+    h3 {{
+        font-size: 18px;
+        font-weight: bold;
+        color: #e6edf3;
+        margin-top: 20px;
+        margin-bottom: 8px;
+    }}
+    h4 {{
+        font-size: 16px;
+        font-weight: bold;
+        color: #e6edf3;
+        margin-top: 18px;
+        margin-bottom: 6px;
+    }}
+    h5 {{
+        font-size: 14px;
+        font-weight: bold;
+        color: #e6edf3;
+        margin-top: 16px;
+        margin-bottom: 4px;
+    }}
+    h6 {{
+        font-size: 13px;
+        font-weight: bold;
+        color: {text_secondary};
+        margin-top: 14px;
+        margin-bottom: 4px;
+    }}
     p {{
-        margin-top: 0;
-        margin-bottom: 16px;
+        margin-top: 0px;
+        margin-bottom: 12px;
     }}
-
     a {{
-        color: #58a6ff;
+        color: {accent};
         text-decoration: none;
     }}
-    a:hover {{
-        text-decoration: underline;
-    }}
-
     strong {{
-        font-weight: 600;
+        font-weight: bold;
         color: #e6edf3;
     }}
-
     em {{
         font-style: italic;
     }}
-
     del {{
         text-decoration: line-through;
         color: {text_secondary};
     }}
-
     code {{
-        font-family: 'Cascadia Code', 'Consolas', 'Fira Code', 'Courier New', monospace;
-        font-size: 85%;
-        background-color: rgba(110, 118, 129, 0.4);
-        padding: 0.2em 0.4em;
-        border-radius: 6px;
+        font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+        font-size: 13px;
+        background-color: #2d333b;
         color: #e6edf3;
+        padding: 2px 5px;
     }}
-
     pre {{
-        margin-top: 0;
-        margin-bottom: 16px;
-        padding: 16px;
-        overflow: auto;
-        font-size: 85%;
-        line-height: 1.45;
         background-color: #161b22;
-        border-radius: 6px;
         border: 1px solid {border};
-    }}
-    pre code {{
-        background: transparent;
-        padding: 0;
-        border-radius: 0;
-        font-size: 100%;
+        padding: 14px;
+        margin-top: 0px;
+        margin-bottom: 14px;
+        font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+        font-size: 13px;
+        color: #e6edf3;
         white-space: pre;
-        word-break: normal;
-        word-wrap: normal;
     }}
-
     blockquote {{
-        margin: 0 0 16px 0;
-        padding: 0 1em;
+        margin: 0px 0px 14px 0px;
+        padding: 0px 0px 0px 14px;
         color: {text_secondary};
-        border-left: 0.25em solid {border};
+        border-left: 3px solid {border};
     }}
-    blockquote p {{
-        margin-bottom: 0;
+    ul {{
+        margin-top: 0px;
+        margin-bottom: 14px;
     }}
-
-    ul, ol {{
-        margin-top: 0;
-        margin-bottom: 16px;
-        padding-left: 2em;
+    ol {{
+        margin-top: 0px;
+        margin-bottom: 14px;
     }}
     li {{
-        margin-top: 0.25em;
+        margin-top: 3px;
+        margin-bottom: 3px;
     }}
-    li + li {{
-        margin-top: 0.25em;
-    }}
-
     hr {{
-        height: 0.25em;
-        padding: 0;
-        margin: 24px 0;
-        background-color: {border};
-        border: 0;
-        border-radius: 2px;
+        border: none;
+        border-top: 2px solid {border};
+        margin: 20px 0px;
     }}
-
     table {{
-        border-spacing: 0;
         border-collapse: collapse;
-        margin-top: 0;
-        margin-bottom: 16px;
-        width: auto;
-        max-width: 100%;
-        overflow-x: auto;
-        display: table;
+        margin-top: 0px;
+        margin-bottom: 14px;
     }}
-    table th {{
-        font-weight: 600;
+    th {{
+        font-weight: bold;
         padding: 6px 13px;
         border: 1px solid {border};
-        background-color: rgba(110, 118, 129, 0.15);
+        background-color: #21262d;
+        color: #e6edf3;
     }}
-    table td {{
+    td {{
         padding: 6px 13px;
         border: 1px solid {border};
     }}
-    table tr {{
-        background-color: {bg};
-        border-top: 1px solid {border};
-    }}
-    table tr:nth-child(2n) {{
-        background-color: rgba(110, 118, 129, 0.05);
-    }}
-
     img {{
-        max-width: 100%;
-        border-style: none;
-        border-radius: 6px;
-    }}
-
-    /* Badges row */
-    div[align="center"] img {{
-        margin: 2px;
-    }}
-
-    /* Scrollbar */
-    ::-webkit-scrollbar {{
-        width: 8px;
-        height: 8px;
-    }}
-    ::-webkit-scrollbar-track {{
-        background: {bg};
-    }}
-    ::-webkit-scrollbar-thumb {{
-        background: rgba(121, 121, 121, 0.4);
-        border-radius: 4px;
-    }}
-    ::-webkit-scrollbar-thumb:hover {{
-        background: rgba(121, 121, 121, 0.7);
+        max-width: 600px;
     }}
     """
 
@@ -759,7 +697,7 @@ def _build_markdown_css(theme: dict) -> str:
 class MarkdownPreviewWidget(BasePreviewWidget):
     """
     Markdown file viewer with split pane:
-    Left = raw editor (QScintilla), Right = rendered HTML preview (QWebEngineView).
+    Left = raw editor (QScintilla), Right = rendered HTML preview (QTextBrowser).
     Live-updates the preview as you type.
     """
 
@@ -843,7 +781,7 @@ class MarkdownPreviewWidget(BasePreviewWidget):
         """)
 
         # Left side: code editor (passed in from EditorTabs)
-        self.editor = editor_widget  # will be set externally
+        self.editor = editor_widget
         self._editor_container = QWidget()
         self._editor_layout = QVBoxLayout(self._editor_container)
         self._editor_layout.setContentsMargins(0, 0, 0, 0)
@@ -851,35 +789,25 @@ class MarkdownPreviewWidget(BasePreviewWidget):
             self._editor_layout.addWidget(self.editor)
         self.splitter.addWidget(self._editor_container)
 
-        # Right side: HTML preview
-        WebView = _get_web_engine_view()
-        if WebView and WebView is not False:
-            self.web_view = WebView()
-            # Allow WebEngine to handle its own scrolling natively
-            self.web_view.setAttribute(
-                Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
-            self._has_webengine = True
-        else:
-            # Fallback: scrollable QLabel if WebEngine is not available
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.Shape.NoFrame)
-            fallback_label = QLabel("Install PyQt6-WebEngine for rendered preview.")
-            fallback_label.setWordWrap(True)
-            fallback_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-            fallback_label.setStyleSheet(f"color: {theme['editor_fg']}; padding: 20px;")
-            scroll.setWidget(fallback_label)
-            self.web_view = scroll
-            self._fallback_label = fallback_label
-            self._has_webengine = False
-        self.splitter.addWidget(self.web_view)
+        # Right side: QTextBrowser preview
+        self.preview = QTextBrowser()
+        self.preview.setOpenExternalLinks(True)
+        self.preview.setFrameShape(QFrame.Shape.NoFrame)
+        self.preview.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: {theme['editor_bg']};
+                color: {theme['editor_fg']};
+                border: none;
+            }}
+        """)
+        # Set search paths for images (so relative paths resolve)
+        self.preview.setSearchPaths([self._base_path])
 
-        # Equal split
+        self.splitter.addWidget(self.preview)
         self.splitter.setSizes([500, 500])
-
         self.layout.addWidget(self.splitter, 1)
 
-        # ── Load and render ──
+        # ── Load source ──
         self._md_source = ""
         if file_path and os.path.exists(file_path):
             try:
@@ -888,66 +816,70 @@ class MarkdownPreviewWidget(BasePreviewWidget):
             except Exception:
                 self._md_source = ""
 
+        # ── Synced scrolling ──
+        self._last_scroll_line = -1
+        self._scroll_timer = QTimer()
+        self._scroll_timer.setInterval(100)
+        self._scroll_timer.timeout.connect(self._sync_preview_scroll)
+
+        # Initial render
         self._render_preview()
 
         # ── Live update: re-render when editor text changes ──
         self._update_timer = QTimer()
         self._update_timer.setSingleShot(True)
-        self._update_timer.setInterval(600)  # debounce 600ms
+        self._update_timer.setInterval(600)
         self._update_timer.timeout.connect(self._on_editor_changed)
+
         if self.editor:
             self.editor.textChanged.connect(self._schedule_update)
+            self._scroll_timer.start()
 
     def set_editor(self, editor_widget):
         """Attach the QScintilla editor after construction."""
         self.editor = editor_widget
         self._editor_layout.addWidget(self.editor)
         self.editor.textChanged.connect(self._schedule_update)
+        self._scroll_timer.start()
 
     def _schedule_update(self):
         self._update_timer.start()
 
+    def _sync_preview_scroll(self):
+        """Sync preview scroll to match editor scroll position."""
+        if not self.editor:
+            return
+        SCI_GETFIRSTVISIBLELINE = 2152
+        SCI_LINESONSCREEN = 2370
+        first_line = self.editor.SendScintilla(SCI_GETFIRSTVISIBLELINE)
+        if first_line == self._last_scroll_line:
+            return
+        self._last_scroll_line = first_line
+
+        total_lines = self.editor.lines()
+        visible_lines = self.editor.SendScintilla(SCI_LINESONSCREEN)
+        max_scroll_line = max(1, total_lines - visible_lines)
+        ratio = min(1.0, max(0.0, first_line / max_scroll_line))
+
+        sb = self.preview.verticalScrollBar()
+        sb.setValue(int(ratio * sb.maximum()))
+
     def _on_editor_changed(self):
         if self.editor:
             self._md_source = self.editor.text()
-            self._update_preview_content()
-
-    def _build_full_html(self):
-        """Build the full HTML document for initial load."""
-        body_html = _markdown_to_html(self._md_source, self._base_path)
-        css = _build_markdown_css(self.theme)
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>{css}</style>
-</head>
-<body>
-<div id="content">{body_html}</div>
-</body>
-</html>"""
+            self._render_preview()
 
     def _render_preview(self):
-        """Full render — used on first load only."""
-        full_html = self._build_full_html()
-        self._initial_loaded = False
-        if self._has_webengine:
-            self.web_view.setHtml(full_html, QUrl.fromLocalFile(self._base_path + '/'))
-            self._initial_loaded = True
-        else:
-            body_html = _markdown_to_html(self._md_source, self._base_path)
-            self._fallback_label.setText(body_html)
-
-    def _update_preview_content(self):
-        """Update only the body content via JS — preserves scroll position, no lag."""
+        """Render the Markdown source into the QTextBrowser."""
         body_html = _markdown_to_html(self._md_source, self._base_path)
-        if self._has_webengine and self._initial_loaded:
-            # Escape for JS string
-            escaped = body_html.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
-            js = f"document.getElementById('content').innerHTML = `{escaped}`;"
-            self.web_view.page().runJavaScript(js)
-        else:
-            self._render_preview()
+        css = _build_markdown_css(self.theme)
+        full_html = f'<html><head><style>{css}</style></head><body>{body_html}</body></html>'
+
+        # Save and restore scroll position
+        sb = self.preview.verticalScrollBar()
+        pos = sb.value()
+        self.preview.setHtml(full_html)
+        QTimer.singleShot(0, lambda: sb.setValue(pos))
 
     def _set_mode(self, mode):
         self.btn_editor.setChecked(mode == "editor")
@@ -956,12 +888,12 @@ class MarkdownPreviewWidget(BasePreviewWidget):
 
         if mode == "editor":
             self._editor_container.show()
-            self.web_view.hide()
+            self.preview.hide()
         elif mode == "preview":
             self._editor_container.hide()
-            self.web_view.show()
+            self.preview.show()
             self._render_preview()
         else:  # split
             self._editor_container.show()
-            self.web_view.show()
+            self.preview.show()
             self.splitter.setSizes([500, 500])

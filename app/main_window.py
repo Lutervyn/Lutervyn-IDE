@@ -92,21 +92,74 @@ class MainWindow(QMainWindow):
         menubar = self.title_bar.get_menu_bar()
 
         file_menu = menubar.addMenu("&File")
-        self._add_action(file_menu, "New File", "Ctrl+N", self.cmd_new_file)
+
+        # New
+        self._add_action(file_menu, "New Text File", "Ctrl+N", self.cmd_new_file)
+        self._add_action(file_menu, "New File...", "Ctrl+Alt+Win+N", self.cmd_new_file_advanced)
         self._add_action(file_menu, "New Window", "Ctrl+Shift+N", lambda: None)
         file_menu.addSeparator()
+
+        # Open
         self._add_action(file_menu, "Open File...", "Ctrl+O", self.cmd_open_file)
-        self._add_action(file_menu, "Open Folder...", "Ctrl+K", self.cmd_open_folder)
+        self._add_action(file_menu, "Open Folder...", "Ctrl+K,Ctrl+O", self.cmd_open_folder)
+        self._add_action(file_menu, "Open Workspace from File...", "", lambda: None)
+        
+        # Open Recent
+        recent_menu = file_menu.addMenu("Open Recent")
+        self._add_action(recent_menu, "Reopen Closed Editor", "Ctrl+Shift+T", lambda: None)
+        recent_menu.addSeparator()
+        self._add_action(recent_menu, "Clear Recently Opened", "", lambda: None)
+        
         file_menu.addSeparator()
+
+        # Workspace
+        self._add_action(file_menu, "Add Folder to Workspace...", "", self.cmd_add_folder_to_workspace)
+        self._add_action(file_menu, "Save Workspace As...", "", lambda: None)
+        self._add_action(file_menu, "Duplicate Workspace", "", lambda: None)
+        file_menu.addSeparator()
+
+        # Save
         self._add_action(file_menu, "Save", "Ctrl+S", self.cmd_save)
         self._add_action(file_menu, "Save As...", "Ctrl+Shift+S", self.cmd_save_as)
         self._add_action(file_menu, "Save All", "", lambda: None)
         file_menu.addSeparator()
-        self._add_action(file_menu, "Preferences", "Ctrl+,", lambda: None)
+
+        # Share
+        share_menu = file_menu.addMenu("Share")
+        self._add_action(share_menu, "Export Profile...", "", lambda: None)
+        self._add_action(share_menu, "Import Profile...", "", lambda: None)
         file_menu.addSeparator()
-        self._add_action(file_menu, "Close Editor", "Ctrl+W",
+
+        # Auto Save
+        auto_save_action = QAction("Auto Save", self)
+        auto_save_action.setCheckable(True)
+        file_menu.addAction(auto_save_action)
+        
+        # Preferences
+        pref_menu = file_menu.addMenu("Preferences")
+        self._add_action(pref_menu, "Settings", "Ctrl+,", lambda: None)
+        self._add_action(pref_menu, "Online Services Settings", "", lambda: None)
+        self._add_action(pref_menu, "Extensions", "Ctrl+Shift+X", lambda: self._switch_sidebar("extensions"))
+        pref_menu.addSeparator()
+        self._add_action(pref_menu, "Keyboard Shortcuts", "Ctrl+K,Ctrl+S", lambda: None)
+        self._add_action(pref_menu, "Keymaps", "Ctrl+K,Ctrl+M", lambda: None)
+        pref_menu.addSeparator()
+        self._add_action(pref_menu, "User Snippets", "", lambda: None)
+        self._add_action(pref_menu, "User Tasks", "", lambda: None)
+        pref_menu.addSeparator()
+        self._add_action(pref_menu, "Theme", "Ctrl+K,Ctrl+T", self.cmd_toggle_theme)
+        
+        file_menu.addSeparator()
+
+        # Close
+        self._add_action(file_menu, "Revert File", "", lambda: None)
+        self._add_action(file_menu, "Close Editor", "Ctrl+F4", 
                          lambda: self.editor_tabs._close_tab(self.editor_tabs.tabs.currentIndex()))
+        self._add_action(file_menu, "Close Folder", "Ctrl+K,F", lambda: None)
         self._add_action(file_menu, "Close Window", "Alt+F4", self.close)
+        
+        file_menu.addSeparator()
+        self._add_action(file_menu, "Exit", "", self.close)
 
         edit_menu = menubar.addMenu("&Edit")
         self._add_action(edit_menu, "Undo", "Ctrl+Z", self.cmd_undo)
@@ -224,6 +277,13 @@ class MainWindow(QMainWindow):
         self.sidebar.find_in_folder_requested.connect(self._on_find_in_folder)
         self.sidebar.workspace_action_requested.connect(self._on_workspace_action)
         self.sidebar.file_close_requested.connect(self._on_file_close_requested)
+        # Connect SearchPanel file_opened signal (includes line number)
+        self.sidebar.search_panel.file_opened.connect(self._open_file_at_line)
+        # Connect file reload signal for live updates after replace
+        self.sidebar.search_panel.file_reloaded.connect(self._reload_file_in_editor)
+        # SCM Badges
+        self.sidebar.scm_count_changed.connect(self._update_scm_badge)
+        
         # self.sidebar.setFixedWidth(280) # Removed to allow resizing
         self.sidebar.setMinimumWidth(50) # Allow shrinking
 
@@ -260,14 +320,29 @@ class MainWindow(QMainWindow):
         self._sync_open_editors() # Initial sync
 
     def _sync_open_editors(self):
-        """Send the list of open files to the sidebar."""
-        open_files = []
+        """Send the list of open files and untitled tabs to the sidebar."""
+        open_items = []
         for i in range(self.editor_tabs.tabs.count()):
             widget = self.editor_tabs.tabs.widget(i)
-            from app.ui.editor import CodeEditorWidget
-            if isinstance(widget, CodeEditorWidget):
-                open_files.append(widget.file_path)
-        self.sidebar.explorer_panel.sync_open_editors(open_files)
+            
+            # Identify path if it's an editor
+            path = None
+            # Generic check to avoid circular imports or missing classes
+            if hasattr(widget, "editor") and hasattr(widget.editor, "file_path"):
+                path = widget.editor.file_path
+            elif hasattr(widget, "file_path"):
+                path = widget.file_path
+                
+            # Get name from tab text (handles "Untitled-1", "● file.py", etc.)
+            name = self.editor_tabs.tabs.tabText(i).replace("● ", "")
+            
+            open_items.append({
+                'name': name,
+                'path': path,
+                'index': i # Pass index for direct switching
+            })
+            
+        self.sidebar.explorer_panel.sync_open_editors(open_items)
 
     def _on_minimize(self):
         self.showMinimized()
@@ -286,6 +361,11 @@ class MainWindow(QMainWindow):
         else:
             self.showFullScreen()
 
+    def _update_scm_badge(self, count: int):
+        """Update the Source Control activity bar badge."""
+        text = str(count) if count > 0 else None
+        self.activity_bar.set_badge("scm", text)
+
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == event.Type.WindowStateChange:
@@ -299,6 +379,131 @@ class MainWindow(QMainWindow):
     def _on_file_close_requested(self, path):
         """Handle request from sidebar to close a file (e.g. before deletion)."""
         self.editor_tabs.close_file(path)
+
+    def _open_file(self, path_or_name):
+        """Open a file in the editor or switch to existing tab."""
+        # 1. If it's a valid file path on disk, open it
+        if path_or_name and os.path.isfile(path_or_name):
+            self.editor_tabs.open_file(path_or_name)
+            return
+
+        # 2. Try to switch by tab name (e.g. "Untitled-1")
+        for i in range(self.editor_tabs.tabs.count()):
+            name = self.editor_tabs.tabs.tabText(i).replace("● ", "")
+            if name == path_or_name:
+                self.editor_tabs.tabs.setCurrentIndex(i)
+                return
+
+    def _open_file_at_line(self, path, line_num):
+        """Open a file and scroll to a specific line (for search results)."""
+        if os.path.isfile(path):
+            self.editor_tabs.open_file(path)
+            # Get the current editor and scroll to line
+            current_widget = self.editor_tabs.tabs.currentWidget()
+            from app.ui.editor import CodeEditorWidget
+            if isinstance(current_widget, CodeEditorWidget) and current_widget.file_path == path:
+                # Line numbers in Scintilla are 0-indexed
+                current_widget.editor.setCursorPosition(line_num - 1, 0)
+                current_widget.editor.ensureLineVisible(line_num - 1)
+
+    def _reload_file_in_editor(self, path):
+        """Reload a file in the editor if it's currently open (for live replace updates)."""
+        print(f"[MainWindow] _reload_file_in_editor called with path: {path}")
+        
+        if not os.path.isfile(path):
+            print(f"[MainWindow] File does not exist: {path}")
+            return
+        
+        # Normalize the path for comparison
+        path_norm = os.path.normpath(path)
+        print(f"[MainWindow] Normalized path: {path_norm}")
+        
+        # Find if the file is open in any tab
+        print(f"[MainWindow] Checking {self.editor_tabs.tabs.count()} tabs")
+        for i in range(self.editor_tabs.tabs.count()):
+            widget = self.editor_tabs.tabs.widget(i)
+            
+            # Debug: Print widget type
+            print(f"[MainWindow] Tab {i}: type = {type(widget).__name__}")
+            
+            # Unwrap EditorWithMinimap if needed
+            from app.ui.editor import EditorWithMinimap, CodeEditorWidget
+            actual_editor = None
+            widget_file_path = None
+            
+            if isinstance(widget, EditorWithMinimap):
+                # It's a wrapper - get the actual editor inside
+                actual_editor = widget.editor
+                if hasattr(actual_editor, 'file_path'):
+                    widget_file_path = actual_editor.file_path
+                    print(f"[MainWindow] Unwrapped EditorWithMinimap, file_path: {widget_file_path}")
+            elif hasattr(widget, 'file_path'):
+                # Direct widget with file_path
+                actual_editor = widget
+                widget_file_path = widget.file_path
+            
+            if widget_file_path:
+                # Normalize both paths for comparison
+                widget_path_norm = os.path.normpath(widget_file_path)
+                print(f"[MainWindow] Tab {i}: {widget_path_norm}")
+                
+                if widget_path_norm == path_norm:
+                    print(f"[MainWindow] MATCH! Reloading tab {i}")
+                    
+                    # Try to reload the file
+                    try:
+                        # Check if it's a CodeEditorWidget
+                        if isinstance(actual_editor, CodeEditorWidget):
+                            # Save cursor position
+                            line, col = actual_editor.getCursorPosition()
+                            
+                            # Read file content
+                            with open(path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                            
+                            print(f"[MainWindow] Read {len(content)} characters from file")
+                            
+                            # Block signals temporarily to avoid triggering modified state
+                            actual_editor.blockSignals(True)
+                            actual_editor.setText(content)
+                            actual_editor.blockSignals(False)
+                            
+                            # Restore cursor position (if still valid)
+                            total_lines = actual_editor.lines()
+                            if line < total_lines:
+                                actual_editor.setCursorPosition(line, col)
+                                actual_editor.ensureLineVisible(line)
+                            
+                            # Mark as saved (not modified)
+                            actual_editor.setModified(False)
+                        
+                        # Check if it has a reload method (generic approach)
+                        elif hasattr(actual_editor, 'reload_file'):
+                            actual_editor.reload_file()
+                            print(f"[MainWindow] Called reload_file() method")
+                        
+                        # Last resort: close and reopen the file
+                        else:
+                            print(f"[MainWindow] Unknown widget type, closing and reopening tab")
+                            self.editor_tabs.tabs.removeTab(i)
+                            self.editor_tabs.open_file(path)
+                        
+                        # Update tab title (remove unsaved indicator if any)
+                        if self.editor_tabs.tabs.count() > i:
+                            tab_title = os.path.basename(path)
+                            self.editor_tabs.tabs.setTabText(i, tab_title)
+                        
+                        print(f"[MainWindow] Successfully reloaded file in tab {i}")
+                        
+                    except Exception as e:
+                        print(f"[MainWindow] Error reloading file {path}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    break
+            else:
+                print(f"[MainWindow] Tab {i}: No file_path found")
+        else:
+            print(f"[MainWindow] No matching tab found for {path_norm}")
 
     _EDGE_SIZE = 5
 
@@ -382,7 +587,21 @@ class MainWindow(QMainWindow):
             self._sidebar_visible = True
 
     def cmd_new_file(self):
-        self.editor_tabs.open_file("")
+        self.editor_tabs.new_file()
+        self._sync_open_editors()
+
+    def cmd_new_file_advanced(self):
+        """Create a new file with language selection."""
+        # TODO: Use a proper Quick Pick / Command Palette here
+        # For now, just ask for language name (simple implementation)
+        from PyQt6.QtWidgets import QInputDialog
+        languages = ["python", "markdown", "json", "html", "css", "javascript"]
+        lang, ok = QInputDialog.getItem(self, "New File...", "Select Language:", languages, 0, False)
+        if ok and lang:
+            self.editor_tabs.new_file(language=lang)
+        else:
+            self.editor_tabs.new_file()
+        self._sync_open_editors()
 
     def cmd_open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -401,6 +620,7 @@ class MainWindow(QMainWindow):
         if folder and os.path.isdir(folder):
             self._current_folder = folder
             self.sidebar.set_root_folder(folder)
+            self.sidebar.search_panel.set_workspace_root(folder)  # Set search root
             self.sidebar.switch_view("explorer")
             self.setWindowTitle(f"{os.path.basename(folder)} - {self.APP_NAME}")
             # Save for next launch
@@ -416,19 +636,64 @@ class MainWindow(QMainWindow):
         editor = self.editor_tabs.get_current_editor()
         if editor:
             if editor.file_path:
-                editor.save_file()
+                try:
+                    editor.save_file()
+                except Exception as e:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.critical(self, "Error", f"Could not save file: {e}")
             else:
                 self.cmd_save_as()
 
     def cmd_save_as(self):
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save As", "",
-            "Python Files (*.py);;All Files (*.*)")
+        editor = self.editor_tabs.get_current_editor()
+        if not editor: return
+
+        # Default filename logic
+        cwd = os.path.abspath(self._current_folder or os.getcwd())
+        
+        # Suggested name from tab
+        index = self.editor_tabs.tabs.currentIndex()
+        suggested_name = "untitled.py"
+        if index != -1:
+            tab_text = self.editor_tabs.tabs.tabText(index).replace("● ", "")
+            # Basic sanitization of name (remove problematic characters for Windows)
+            import re
+            suggested_name = re.sub(r'[<>:"/\\|?*]', '_', tab_text)
+            if "." not in suggested_name:
+                suggested_name += ".py"
+
+        # Use native separators for Windows compatibility
+        default_path = os.path.normpath(os.path.join(cwd, suggested_name))
+        
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self, "Save As...", default_path, 
+            "Python Files (*.py);;Markdown Files (*.md);;JSON Files (*.json);;All Files (*.*)"
+        )
+        
         if file_path:
-            editor = self.editor_tabs.get_current_editor()
-            if editor:
-                editor.file_path = file_path
-                editor.save_file()
+            try:
+                # Normalize and ensure absolute
+                file_path = os.path.abspath(os.path.normpath(file_path))
+                
+                # If no extension was typed and a specific filter was selected, add it?
+                # Actually most users prefer explicit. But let's check.
+                if "." not in os.path.basename(file_path):
+                    if "Python" in selected_filter: file_path += ".py"
+                    elif "Markdown" in selected_filter: file_path += ".md"
+                    elif "JSON" in selected_filter: file_path += ".json"
+                
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(editor.text())
+                
+                # Update editor state
+                self.editor_tabs.set_current_file_path(file_path)
+                editor.setModified(False)
+                self.sidebar.explorer_panel.refresh()
+                self._sync_open_editors()
+
+            except Exception as e:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "Error", f"Could not save file: {e}")
 
     def cmd_undo(self):
         e = self.editor_tabs.get_current_editor()

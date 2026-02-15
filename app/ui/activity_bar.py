@@ -6,7 +6,7 @@ Shows icons for: Explorer, Search, Source Control, Run/Debug, Extensions.
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton,
                               QSizePolicy, QSpacerItem)
-from PyQt6.QtCore import pyqtSignal, Qt, QSize
+from PyQt6.QtCore import pyqtSignal, Qt, QSize, QRect
 from PyQt6.QtGui import QIcon, QPainter, QColor, QPixmap
 
 
@@ -41,6 +41,10 @@ class ActivityBarButton(QPushButton):
     def set_active(self, active: bool):
         self._active = active
         self.setChecked(active)
+        self.update()
+
+    def set_badge(self, text: str):
+        self.badge_text = text
         self.update()
 
     def paintEvent(self, event):
@@ -84,6 +88,26 @@ class ActivityBarButton(QPushButton):
             x = (self.width() - 24) // 2
             y = (self.height() - 24) // 2
             painter.drawPixmap(x, y, tinted)
+
+        # Draw Badge
+        if getattr(self, 'badge_text', None):
+            painter.setBrush(QColor("#007acc")) # VS Code blue badge color
+            painter.setPen(Qt.PenStyle.NoPen)
+            
+            # Adjust badge size based on text length
+            text_width = painter.fontMetrics().horizontalAdvance(str(self.badge_text))
+            badge_width = max(16, text_width + 8)
+            # Position at bottom-right of icon area
+            badge_rect = QRect(self.width() - badge_width - 4, self.height() - 22, badge_width, 16)
+            
+            painter.drawRoundedRect(badge_rect, 8, 8)
+            
+            painter.setPen(QColor("#ffffff"))
+            font = painter.font()
+            font.setPointSize(8)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, str(self.badge_text))
 
         painter.end()
 
@@ -147,6 +171,13 @@ class ActivityBar(QWidget):
 
         # Set initial active
         self.buttons[0].set_active(True)
+
+    def set_badge(self, view_id: str, text: str):
+        """Set a notification badge on a specific view button."""
+        for btn in self.buttons:
+            if btn.view_id == view_id:
+                btn.set_badge(text)
+                break
 
     def _on_click(self, view_id: str):
         if self._current_view == view_id:
