@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea,
                              QHBoxLayout, QPushButton, QSlider,
                              QFrame)
 from PyQt6.QtCore import Qt, QSize, QUrl, pyqtSignal, QEvent
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QFont, QWheelEvent
+from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QFont, QWheelEvent, QIcon
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtSvgWidgets import QSvgWidget
@@ -159,7 +159,7 @@ class SVGPreviewWidget(BasePreviewWidget):
         self.svg_widget.setFixedSize(new_w, new_h)
 
 class VideoPreviewWidget(BasePreviewWidget):
-    """Video player with basic controls."""
+    """Video player with VS Code-style controls."""
     def __init__(self, file_path: str, theme: dict, parent=None):
         super().__init__(file_path, theme, parent)
         self.media_player = QMediaPlayer()
@@ -167,36 +167,154 @@ class VideoPreviewWidget(BasePreviewWidget):
         self.audio_output = QAudioOutput()
         self.media_player.setVideoOutput(self.video_widget)
         self.media_player.setAudioOutput(self.audio_output)
-        self.layout.addWidget(self.video_widget)
         
-        controls = QWidget()
-        controls.setFixedHeight(40)
-        controls.setStyleSheet(f"background: {theme['sidebar_bg']}; border-top: 1px solid {theme['border']};")
-        ctrl_layout = QHBoxLayout(controls)
-        ctrl_layout.setContentsMargins(10, 0, 10, 0)
+        # Black background for video area
+        self.video_container = QFrame()
+        self.video_container.setStyleSheet("background-color: black;")
+        v_layout = QVBoxLayout(self.video_container)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        v_layout.addWidget(self.video_widget)
+        self.layout.addWidget(self.video_container)
         
-        self.play_btn = QPushButton("Play")
-        self.play_btn.setFixedSize(60, 24)
+        # Control bar
+        self.controls = QFrame()
+        self.controls.setFixedHeight(45)
+        self.controls.setObjectName("videoControls")
+        self.controls.setStyleSheet(f"""
+            QFrame#videoControls {{
+                background-color: {theme['sidebar_bg']};
+                border-top: 1px solid {theme['border']};
+            }}
+            QPushButton {{
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['bg_hover']};
+            }}
+            QLabel {{
+                color: {theme['text_secondary']};
+                font-size: 11px;
+                font-family: 'Segoe UI', sans-serif;
+            }}
+            QSlider::groove:horizontal {{
+                border: 1px solid {theme['border']};
+                height: 4px;
+                background: {theme['bg_hover']};
+                margin: 2px 0;
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {theme['accent'] if 'accent' in theme else '#007ACC'};
+                border: none;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {theme['accent'] if 'accent' in theme else '#007ACC'};
+                border-radius: 2px;
+            }}
+        """)
+        
+        ctrl_layout = QHBoxLayout(self.controls)
+        ctrl_layout.setContentsMargins(15, 0, 15, 0)
+        ctrl_layout.setSpacing(10)
+        
+        # Paths for icons
+        self.icons_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "icons")
+        
+        # Play button
+        self.play_btn = QPushButton()
+        self.play_btn.setFixedSize(30, 30)
+        self._update_play_icon(False)
         self.play_btn.clicked.connect(self._toggle_playback)
         ctrl_layout.addWidget(self.play_btn)
         
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.media_player.positionChanged.connect(self.slider.setValue)
-        self.media_player.durationChanged.connect(self.slider.setMaximum)
-        self.slider.sliderMoved.connect(self.media_player.setPosition)
-        ctrl_layout.addWidget(self.slider)
-        self.layout.addWidget(controls)
+        # Time label
+        self.time_label = QLabel("0:00 / 0:00")
+        ctrl_layout.addWidget(self.time_label)
         
+        # Seek slider
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.media_player.positionChanged.connect(self._on_position_changed)
+        self.media_player.durationChanged.connect(self._on_duration_changed)
+        self.slider.sliderMoved.connect(self.media_player.setPosition)
+        ctrl_layout.addWidget(self.slider, 1) # Take most space
+        
+        # Volume button
+        self.volume_btn = QPushButton()
+        self.volume_btn.setFixedSize(26, 26)
+        self.volume_btn.setIcon(QIcon(os.path.join(self.icons_path, "video_volume.svg")))
+        self.volume_btn.clicked.connect(self._toggle_mute)
+        ctrl_layout.addWidget(self.volume_btn)
+        
+        # Volume slider
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.valueChanged.connect(lambda v: self.audio_output.setVolume(v / 100.0))
+        ctrl_layout.addWidget(self.volume_slider)
+        
+        self.layout.addWidget(self.controls)
+        
+        # Initialization
         self.media_player.setSource(QUrl.fromLocalFile(file_path))
+        self.media_player.playbackStateChanged.connect(self._on_state_changed)
         self.media_player.play()
+
+    def _update_play_icon(self, playing):
+        icon_name = "video_pause.svg" if playing else "video_play.svg"
+        icon_path = os.path.join(self.icons_path, icon_name)
+        if os.path.exists(icon_path):
+            from PyQt6.QtGui import QIcon
+            self.play_btn.setIcon(QIcon(icon_path))
+            self.play_btn.setIconSize(self.play_btn.size() - QSize(10, 10))
+
+    def _on_state_changed(self, state):
+        self._update_play_icon(state == QMediaPlayer.PlaybackState.PlayingState)
 
     def _toggle_playback(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
-            self.play_btn.setText("Play")
         else:
             self.media_player.play()
-            self.play_btn.setText("Pause")
+
+    def _toggle_mute(self):
+        is_muted = self.audio_output.isMuted()
+        self.audio_output.setMuted(not is_muted)
+        icon_name = "video_mute.svg" if not is_muted else "video_volume.svg"
+        icon_path = os.path.join(self.icons_path, icon_name)
+        if os.path.exists(icon_path):
+            from PyQt6.QtGui import QIcon
+            self.volume_btn.setIcon(QIcon(icon_path))
+
+    def _on_position_changed(self, position):
+        self.slider.setValue(position)
+        self._update_time_label()
+
+    def _on_duration_changed(self, duration):
+        self.slider.setMaximum(duration)
+        self._update_time_label()
+
+    def _update_time_label(self):
+        pos = self.media_player.position() // 1000
+        dur = self.media_player.duration() // 1000
+        
+        p_min, p_sec = divmod(pos, 60)
+        d_min, d_sec = divmod(dur, 60)
+        
+        self.time_label.setText(f"{p_min}:{p_sec:02d} / {d_min}:{d_sec:02d}")
+
+    def closeEvent(self, event):
+        """Release media player and source to unlock the file."""
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
+        super().closeEvent(event)
 
 class JSONPreviewWidget(BasePreviewWidget):
     """Structural tree view for JSON data."""

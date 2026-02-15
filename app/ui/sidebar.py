@@ -591,6 +591,7 @@ class ProjectSection(QWidget):
     terminal_requested = pyqtSignal(str)
     find_in_folder_requested = pyqtSignal(str)
     workspace_action_requested = pyqtSignal(str, str)
+    file_close_requested = pyqtSignal(str) # Request main window to close tab
     expansion_changed = pyqtSignal()
 
     def __init__(self, path: str, theme: dict, parent=None):
@@ -755,6 +756,17 @@ class ProjectSection(QWidget):
                     QMessageBox.warning(self, "Move Error", f"'{base}' already exists in '{os.path.basename(target_path)}'.")
                     return
 
+                # Ask for confirmation
+                reply = QMessageBox.question(
+                    self, "Confirm Move",
+                    f"Are you sure you want to move '{base}' to '{os.path.basename(target_path)}'?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
                 # Perform the filesystem move
                 shutil.move(source_path, dest)
                 event.acceptProposedAction()
@@ -877,6 +889,9 @@ class ProjectSection(QWidget):
         confirm = QMessageBox.question(self, "Delete", f"Are you sure you want to delete '{os.path.basename(path)}'?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if confirm == QMessageBox.StandardButton.Yes:
+            # Emit signal to close tab first (releases file lock)
+            self.file_close_requested.emit(path)
+            
             try:
                 if os.path.isdir(path):
                     import shutil
@@ -1035,6 +1050,7 @@ class FileExplorerPanel(QWidget):
     terminal_requested = pyqtSignal(str)
     find_in_folder_requested = pyqtSignal(str)
     workspace_action_requested = pyqtSignal(str, str)
+    file_close_requested = pyqtSignal(str)
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -1137,6 +1153,7 @@ class FileExplorerPanel(QWidget):
         project.terminal_requested.connect(self.terminal_requested.emit)
         project.find_in_folder_requested.connect(self.find_in_folder_requested.emit)
         project.workspace_action_requested.connect(self.workspace_action_requested.emit)
+        project.file_close_requested.connect(self.file_close_requested.emit)
         project.expansion_changed.connect(self._update_projects_stretch)
         
         self.projects.append(project)
@@ -2470,6 +2487,7 @@ class Sidebar(QWidget):
     terminal_requested = pyqtSignal(str)
     find_in_folder_requested = pyqtSignal(str)
     workspace_action_requested = pyqtSignal(str, str)
+    file_close_requested = pyqtSignal(str)
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -2488,6 +2506,7 @@ class Sidebar(QWidget):
         self.explorer_panel.terminal_requested.connect(self.terminal_requested.emit)
         self.explorer_panel.find_in_folder_requested.connect(self.find_in_folder_requested.emit)
         self.explorer_panel.workspace_action_requested.connect(self.workspace_action_requested.emit)
+        self.explorer_panel.file_close_requested.connect(self.file_close_requested.emit)
         self.search_panel = SearchPanel(theme, self)
         self.scm_panel = SourceControlPanel(theme, self)
         self.scm_panel.file_opened.connect(self.file_opened.emit)

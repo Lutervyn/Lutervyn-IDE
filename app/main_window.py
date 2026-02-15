@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
         self.sidebar.terminal_requested.connect(self._on_terminal_requested)
         self.sidebar.find_in_folder_requested.connect(self._on_find_in_folder)
         self.sidebar.workspace_action_requested.connect(self._on_workspace_action)
+        self.sidebar.file_close_requested.connect(self._on_file_close_requested)
         # self.sidebar.setFixedWidth(280) # Removed to allow resizing
         self.sidebar.setMinimumWidth(50) # Allow shrinking
 
@@ -294,6 +295,10 @@ class MainWindow(QMainWindow):
         super().setWindowTitle(title)
         if hasattr(self, "title_bar"):
             self.title_bar.set_title(title)
+
+    def _on_file_close_requested(self, path):
+        """Handle request from sidebar to close a file (e.g. before deletion)."""
+        self.editor_tabs.close_file(path)
 
     _EDGE_SIZE = 5
 

@@ -861,6 +861,9 @@ class EditorTabs(QWidget):
             self._open_files.pop(path, None)
 
         self.tabs.removeTab(index)
+        if widget:
+            widget.close() # Ensure closeEvent is called for media widgets
+            widget.deleteLater()
         self.tabs_changed.emit()
 
         # Rebuild index map
@@ -879,6 +882,23 @@ class EditorTabs(QWidget):
         if self.tabs.count() == 0:
             welcome = WelcomeTab(self.theme, self)
             self.tabs.addTab(welcome, "Welcome")
+
+    def close_file(self, file_path: str):
+        """Close the tab for the given file path if it's open."""
+        if not file_path: return
+        file_path = os.path.normpath(file_path)
+        
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            p = None
+            if hasattr(widget, 'file_path'):
+                p = os.path.normpath(widget.file_path)
+            elif isinstance(widget, EditorWithMinimap):
+                p = os.path.normpath(widget.editor.file_path)
+                
+            if p == file_path:
+                self._close_tab(i)
+                return
 
     def save_current(self):
         """Save the currently active file."""
