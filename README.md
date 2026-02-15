@@ -4,7 +4,7 @@
 
 # Lutervyn IDE
 
-**A modernIDE built entirely in Python**
+**A modern IDE built entirely in Python**
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.x-41cd52?style=flat-square&logo=qt&logoColor=white)
@@ -33,13 +33,11 @@
 ## Features
 
 ### Editor
-### Editor
 - **QScintilla-powered code editor** with syntax highlighting for Python, JavaScript, HTML, CSS, JSON, and more
 - **Multi-tab editing** — open multiple files side by side
 - **Find & Replace** in the current file
 - **Line numbers**, current line highlight, auto-indentation
 
-### Interface
 ### Interface
 - **Custom frameless title bar** with integrated menus, search bar, and window controls — just like VS Code
 - **Dark & Light themes** — iOS-inspired modern design with rounded menus, pill scrollbars, and smooth styling
@@ -50,12 +48,10 @@
 - **Command Palette** (`Ctrl+Shift+P`) — quick access to every command
 
 ### Python
-### Python
 - **Run Python files** directly with one click or `F5`
 - **Stop running scripts** anytime
 - **Output capture** — stdout and stderr shown in the Output panel
 
-### Help & Tools
 ### Help & Tools
 - **Welcome Page** — rich getting-started tab with quick links
 - **Keyboard Shortcuts Reference** — searchable table of all shortcuts
@@ -63,7 +59,6 @@
 - **Report Issue** dialog — auto-collects system info
 - **Developer Tools** — log viewer with Python/system details
 
-### OS Integration
 ### OS Integration
 - **Windows right-click context menu** — "Open with Lutervyn IDE" for files, folders, and folder backgrounds
 - **Taskbar icon** — custom logo in taskbar and Alt+Tab
@@ -169,3 +164,7 @@ This project is licensed under the **MIT License**.
 ---
 
 <div align="center">
+
+**Made with ❤️ using Python & PyQt6**
+
+</div>

@@ -1,14 +1,28 @@
 import os
+import re
 import json
+import html as html_module
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, 
                              QTreeWidget, QTreeWidgetItem, QHeaderView,
                              QHBoxLayout, QPushButton, QSlider,
-                             QFrame)
-from PyQt6.QtCore import Qt, QSize, QUrl, pyqtSignal, QEvent
+                             QFrame, QSplitter)
+from PyQt6.QtCore import Qt, QSize, QUrl, pyqtSignal, QEvent, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QFont, QWheelEvent, QIcon
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtSvgWidgets import QSvgWidget
+
+# Lazy import for WebEngine — heavy dependency, may not be installed
+_QWebEngineView = None
+def _get_web_engine_view():
+    global _QWebEngineView
+    if _QWebEngineView is None:
+        try:
+            from PyQt6.QtWebEngineWidgets import QWebEngineView
+            _QWebEngineView = QWebEngineView
+        except ImportError:
+            _QWebEngineView = False  # Mark as unavailable
+    return _QWebEngineView
 
 class BasePreviewWidget(QWidget):
     """Base class for all media preview widgets."""
@@ -361,3 +375,593 @@ class JSONPreviewWidget(BasePreviewWidget):
         else:
             parent_item.setText(1, str(data))
             parent_item.setText(2, type(data).__name__)
+
+
+def _markdown_to_html(md_text: str, base_path: str = "") -> str:
+    """
+    Convert Markdown text to HTML.
+    Supports: headings, bold, italic, strikethrough, inline code, code blocks,
+    links, images, blockquotes, horizontal rules, ordered/unordered lists, tables.
+    """
+    lines = md_text.split('\n')
+    html_lines = []
+    in_code_block = False
+    code_lang = ""
+    code_buffer = []
+    in_list = False       # currently inside a <ul> or <ol>
+    list_type = ""        # "ul" or "ol"
+    in_table = False
+    table_buffer = []
+
+    def _close_list():
+        nonlocal in_list, list_type
+        if in_list:
+            html_lines.append(f'</{list_type}>')
+            in_list = False
+            list_type = ""
+
+    def _close_table():
+        nonlocal in_table, table_buffer
+        if in_table and table_buffer:
+            html_lines.append(_render_table(table_buffer))
+            table_buffer = []
+            in_table = False
+
+    def _render_table(rows):
+        """Render a Markdown table given a list of raw row strings."""
+        if len(rows) < 2:
+            return '<p>' + html_module.escape('|'.join(rows)) + '</p>'
+        result = '<table>\n<thead>\n<tr>'
+        header_cells = [c.strip() for c in rows[0].strip('|').split('|')]
+        for cell in header_cells:
+            result += f'<th>{_inline(cell)}</th>'
+        result += '</tr>\n</thead>\n<tbody>\n'
+        # rows[1] is the separator row (---|---), skip it
+        for row in rows[2:]:
+            result += '<tr>'
+            cells = [c.strip() for c in row.strip('|').split('|')]
+            for cell in cells:
+                result += f'<td>{_inline(cell)}</td>'
+            result += '</tr>\n'
+        result += '</tbody>\n</table>'
+        return result
+
+    def _inline(text):
+        """Process inline Markdown: bold, italic, code, links, images, strikethrough."""
+        # Images ![alt](url)
+        text = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', lambda m: _img_tag(m.group(2), m.group(1), base_path), text)
+        # Links [text](url)
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+        # Inline code `code`
+        text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+        # Bold+Italic ***text*** or ___text___
+        text = re.sub(r'\*\*\*(.+?)\*\*\*', r'<strong><em>\1</em></strong>', text)
+        text = re.sub(r'___(.+?)___', r'<strong><em>\1</em></strong>', text)
+        # Bold **text** or __text__
+        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+        text = re.sub(r'__(.+?)__', r'<strong>\1</strong>', text)
+        # Italic *text* or _text_
+        text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+        text = re.sub(r'(?<!\w)_(.+?)_(?!\w)', r'<em>\1</em>', text)
+        # Strikethrough ~~text~~
+        text = re.sub(r'~~(.+?)~~', r'<del>\1</del>', text)
+        return text
+
+    def _img_tag(src, alt, bp):
+        """Build <img> tag, resolving relative paths."""
+        if not src.startswith(('http://', 'https://', 'data:')):
+            full = os.path.normpath(os.path.join(bp, src))
+            src = QUrl.fromLocalFile(full).toString()
+        return f'<img src="{src}" alt="{html_module.escape(alt)}" style="max-width:100%;">'
+
+    for line in lines:
+        # ── Fenced code blocks ──
+        if line.strip().startswith('```'):
+            if not in_code_block:
+                _close_list()
+                _close_table()
+                in_code_block = True
+                code_lang = line.strip()[3:].strip()
+                code_buffer = []
+            else:
+                in_code_block = False
+                escaped = html_module.escape('\n'.join(code_buffer))
+                lang_cls = f' class="language-{code_lang}"' if code_lang else ''
+                html_lines.append(f'<pre><code{lang_cls}>{escaped}</code></pre>')
+            continue
+
+        if in_code_block:
+            code_buffer.append(line)
+            continue
+
+        stripped = line.strip()
+
+        # ── Blank line → close open lists/tables, add spacing ──
+        if not stripped:
+            _close_list()
+            _close_table()
+            continue
+
+        # ── Table rows (lines containing | ) ──
+        if '|' in stripped and stripped.startswith('|'):
+            _close_list()
+            in_table = True
+            table_buffer.append(stripped)
+            continue
+        else:
+            _close_table()
+
+        # ── Horizontal rule ──
+        if re.match(r'^([-*_]\s*){3,}$', stripped):
+            _close_list()
+            html_lines.append('<hr>')
+            continue
+
+        # ── Headings ──
+        heading_match = re.match(r'^(#{1,6})\s+(.+)', stripped)
+        if heading_match:
+            _close_list()
+            level = len(heading_match.group(1))
+            text = _inline(heading_match.group(2))
+            html_lines.append(f'<h{level}>{text}</h{level}>')
+            continue
+
+        # ── Blockquotes ──
+        if stripped.startswith('>'):
+            _close_list()
+            text = _inline(stripped.lstrip('>').strip())
+            html_lines.append(f'<blockquote><p>{text}</p></blockquote>')
+            continue
+
+        # ── Unordered list ──
+        ul_match = re.match(r'^(\s*)([-*+])\s+(.+)', line)
+        if ul_match:
+            _close_table()
+            if not in_list or list_type != 'ul':
+                _close_list()
+                in_list = True
+                list_type = 'ul'
+                html_lines.append('<ul>')
+            html_lines.append(f'<li>{_inline(ul_match.group(3))}</li>')
+            continue
+
+        # ── Ordered list ──
+        ol_match = re.match(r'^(\s*)(\d+)\.\s+(.+)', line)
+        if ol_match:
+            _close_table()
+            if not in_list or list_type != 'ol':
+                _close_list()
+                in_list = True
+                list_type = 'ol'
+                html_lines.append('<ol>')
+            html_lines.append(f'<li>{_inline(ol_match.group(3))}</li>')
+            continue
+
+        # ── If we were in a list but this line doesn't match, close it ──
+        _close_list()
+
+        # ── HTML pass-through (div, img, br, etc.) ──
+        if stripped.startswith('<'):
+            html_lines.append(line)
+            continue
+
+        # ── Normal paragraph ──
+        html_lines.append(f'<p>{_inline(stripped)}</p>')
+
+    # Close any remaining open blocks
+    if in_code_block:
+        escaped = html_module.escape('\n'.join(code_buffer))
+        html_lines.append(f'<pre><code>{escaped}</code></pre>')
+    _close_list()
+    _close_table()
+
+    return '\n'.join(html_lines)
+
+
+def _build_markdown_css(theme: dict) -> str:
+    """Build GitHub-flavored dark Markdown CSS using the IDE theme colors."""
+    bg = theme.get('editor_bg', '#1e1e1e')
+    fg = theme.get('editor_fg', '#d4d4d4')
+    border = theme.get('border', '#3a3a3c')
+    accent = theme.get('accent', '#58a6ff')
+    bg_medium = theme.get('bg_medium', '#1c1c1e')
+    text_secondary = theme.get('text_secondary', '#8b949e')
+
+    return f"""
+    * {{
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }}
+    html {{
+        height: 100%;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }}
+    body {{
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        color: {fg};
+        background-color: {bg};
+        padding: 28px 32px;
+        word-wrap: break-word;
+        min-height: 100%;
+        margin: 0;
+    }}
+    h1, h2, h3, h4, h5, h6 {{
+        margin-top: 24px;
+        margin-bottom: 16px;
+        font-weight: 600;
+        line-height: 1.25;
+        color: #e6edf3;
+    }}
+    h1 {{
+        font-size: 2em;
+        padding-bottom: 0.3em;
+        border-bottom: 1px solid {border};
+    }}
+    h2 {{
+        font-size: 1.5em;
+        padding-bottom: 0.3em;
+        border-bottom: 1px solid {border};
+    }}
+    h3 {{ font-size: 1.25em; }}
+    h4 {{ font-size: 1em; }}
+    h5 {{ font-size: 0.875em; }}
+    h6 {{ font-size: 0.85em; color: {text_secondary}; }}
+
+    p {{
+        margin-top: 0;
+        margin-bottom: 16px;
+    }}
+
+    a {{
+        color: #58a6ff;
+        text-decoration: none;
+    }}
+    a:hover {{
+        text-decoration: underline;
+    }}
+
+    strong {{
+        font-weight: 600;
+        color: #e6edf3;
+    }}
+
+    em {{
+        font-style: italic;
+    }}
+
+    del {{
+        text-decoration: line-through;
+        color: {text_secondary};
+    }}
+
+    code {{
+        font-family: 'Cascadia Code', 'Consolas', 'Fira Code', 'Courier New', monospace;
+        font-size: 85%;
+        background-color: rgba(110, 118, 129, 0.4);
+        padding: 0.2em 0.4em;
+        border-radius: 6px;
+        color: #e6edf3;
+    }}
+
+    pre {{
+        margin-top: 0;
+        margin-bottom: 16px;
+        padding: 16px;
+        overflow: auto;
+        font-size: 85%;
+        line-height: 1.45;
+        background-color: #161b22;
+        border-radius: 6px;
+        border: 1px solid {border};
+    }}
+    pre code {{
+        background: transparent;
+        padding: 0;
+        border-radius: 0;
+        font-size: 100%;
+        white-space: pre;
+        word-break: normal;
+        word-wrap: normal;
+    }}
+
+    blockquote {{
+        margin: 0 0 16px 0;
+        padding: 0 1em;
+        color: {text_secondary};
+        border-left: 0.25em solid {border};
+    }}
+    blockquote p {{
+        margin-bottom: 0;
+    }}
+
+    ul, ol {{
+        margin-top: 0;
+        margin-bottom: 16px;
+        padding-left: 2em;
+    }}
+    li {{
+        margin-top: 0.25em;
+    }}
+    li + li {{
+        margin-top: 0.25em;
+    }}
+
+    hr {{
+        height: 0.25em;
+        padding: 0;
+        margin: 24px 0;
+        background-color: {border};
+        border: 0;
+        border-radius: 2px;
+    }}
+
+    table {{
+        border-spacing: 0;
+        border-collapse: collapse;
+        margin-top: 0;
+        margin-bottom: 16px;
+        width: auto;
+        max-width: 100%;
+        overflow-x: auto;
+        display: table;
+    }}
+    table th {{
+        font-weight: 600;
+        padding: 6px 13px;
+        border: 1px solid {border};
+        background-color: rgba(110, 118, 129, 0.15);
+    }}
+    table td {{
+        padding: 6px 13px;
+        border: 1px solid {border};
+    }}
+    table tr {{
+        background-color: {bg};
+        border-top: 1px solid {border};
+    }}
+    table tr:nth-child(2n) {{
+        background-color: rgba(110, 118, 129, 0.05);
+    }}
+
+    img {{
+        max-width: 100%;
+        border-style: none;
+        border-radius: 6px;
+    }}
+
+    /* Badges row */
+    div[align="center"] img {{
+        margin: 2px;
+    }}
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {{
+        width: 8px;
+        height: 8px;
+    }}
+    ::-webkit-scrollbar-track {{
+        background: {bg};
+    }}
+    ::-webkit-scrollbar-thumb {{
+        background: rgba(121, 121, 121, 0.4);
+        border-radius: 4px;
+    }}
+    ::-webkit-scrollbar-thumb:hover {{
+        background: rgba(121, 121, 121, 0.7);
+    }}
+    """
+
+
+class MarkdownPreviewWidget(BasePreviewWidget):
+    """
+    Markdown file viewer with split pane:
+    Left = raw editor (QScintilla), Right = rendered HTML preview (QWebEngineView).
+    Live-updates the preview as you type.
+    """
+
+    def __init__(self, file_path: str, theme: dict, editor_widget=None, parent=None):
+        super().__init__(file_path, theme, parent)
+
+        self._base_path = os.path.dirname(os.path.abspath(file_path))
+
+        # ── Toolbar ──
+        toolbar = QFrame()
+        toolbar.setFixedHeight(32)
+        toolbar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {theme['sidebar_bg']};
+                border-bottom: 1px solid {theme['border']};
+            }}
+            QPushButton {{
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 10px;
+                color: {theme['text_secondary']};
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['bg_hover']};
+                color: {theme['text_primary']};
+            }}
+            QPushButton:checked {{
+                background-color: {theme['bg_active']};
+                color: {theme['text_primary']};
+            }}
+            QLabel {{
+                color: {theme['text_secondary']};
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 12px;
+                padding-left: 10px;
+            }}
+        """)
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(8, 0, 8, 0)
+        tb_layout.setSpacing(4)
+
+        tb_layout.addWidget(QLabel("Markdown Preview"))
+        tb_layout.addStretch()
+
+        self.btn_editor = QPushButton("Editor")
+        self.btn_editor.setCheckable(True)
+        self.btn_split = QPushButton("Split")
+        self.btn_split.setCheckable(True)
+        self.btn_split.setChecked(True)
+        self.btn_preview = QPushButton("Preview")
+        self.btn_preview.setCheckable(True)
+
+        self.btn_editor.clicked.connect(lambda: self._set_mode("editor"))
+        self.btn_split.clicked.connect(lambda: self._set_mode("split"))
+        self.btn_preview.clicked.connect(lambda: self._set_mode("preview"))
+
+        tb_layout.addWidget(self.btn_editor)
+        tb_layout.addWidget(self.btn_split)
+        tb_layout.addWidget(self.btn_preview)
+
+        self.layout.addWidget(toolbar)
+
+        # ── Splitter: Editor (left) + Preview (right) ──
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(4)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setStyleSheet(f"""
+            QSplitter::handle {{
+                background: {theme['border']};
+                width: 4px;
+            }}
+            QSplitter::handle:hover {{
+                background: {theme['accent']};
+            }}
+            QSplitter::handle:pressed {{
+                background: {theme['accent']};
+            }}
+        """)
+
+        # Left side: code editor (passed in from EditorTabs)
+        self.editor = editor_widget  # will be set externally
+        self._editor_container = QWidget()
+        self._editor_layout = QVBoxLayout(self._editor_container)
+        self._editor_layout.setContentsMargins(0, 0, 0, 0)
+        if self.editor:
+            self._editor_layout.addWidget(self.editor)
+        self.splitter.addWidget(self._editor_container)
+
+        # Right side: HTML preview
+        WebView = _get_web_engine_view()
+        if WebView and WebView is not False:
+            self.web_view = WebView()
+            # Allow WebEngine to handle its own scrolling natively
+            self.web_view.setAttribute(
+                Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+            self._has_webengine = True
+        else:
+            # Fallback: scrollable QLabel if WebEngine is not available
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            fallback_label = QLabel("Install PyQt6-WebEngine for rendered preview.")
+            fallback_label.setWordWrap(True)
+            fallback_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+            fallback_label.setStyleSheet(f"color: {theme['editor_fg']}; padding: 20px;")
+            scroll.setWidget(fallback_label)
+            self.web_view = scroll
+            self._fallback_label = fallback_label
+            self._has_webengine = False
+        self.splitter.addWidget(self.web_view)
+
+        # Equal split
+        self.splitter.setSizes([500, 500])
+
+        self.layout.addWidget(self.splitter, 1)
+
+        # ── Load and render ──
+        self._md_source = ""
+        if file_path and os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    self._md_source = f.read()
+            except Exception:
+                self._md_source = ""
+
+        self._render_preview()
+
+        # ── Live update: re-render when editor text changes ──
+        self._update_timer = QTimer()
+        self._update_timer.setSingleShot(True)
+        self._update_timer.setInterval(400)  # debounce 400ms
+        self._update_timer.timeout.connect(self._on_editor_changed)
+        if self.editor:
+            self.editor.textChanged.connect(self._schedule_update)
+
+    def set_editor(self, editor_widget):
+        """Attach the QScintilla editor after construction."""
+        self.editor = editor_widget
+        self._editor_layout.addWidget(self.editor)
+        self.editor.textChanged.connect(self._schedule_update)
+
+    def _schedule_update(self):
+        self._update_timer.start()
+
+    def _on_editor_changed(self):
+        if self.editor:
+            self._md_source = self.editor.text()
+            self._update_preview_content()
+
+    def _build_full_html(self):
+        """Build the full HTML document for initial load."""
+        body_html = _markdown_to_html(self._md_source, self._base_path)
+        css = _build_markdown_css(self.theme)
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>{css}</style>
+</head>
+<body>
+<div id="content">{body_html}</div>
+</body>
+</html>"""
+
+    def _render_preview(self):
+        """Full render — used on first load only."""
+        full_html = self._build_full_html()
+        self._initial_loaded = False
+        if self._has_webengine:
+            self.web_view.setHtml(full_html, QUrl.fromLocalFile(self._base_path + '/'))
+            self._initial_loaded = True
+        else:
+            body_html = _markdown_to_html(self._md_source, self._base_path)
+            self._fallback_label.setText(body_html)
+
+    def _update_preview_content(self):
+        """Update only the body content via JS — preserves scroll position, no lag."""
+        body_html = _markdown_to_html(self._md_source, self._base_path)
+        if self._has_webengine and self._initial_loaded:
+            # Escape for JS string
+            escaped = body_html.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
+            js = f"document.getElementById('content').innerHTML = `{escaped}`;"
+            self.web_view.page().runJavaScript(js)
+        else:
+            self._render_preview()
+
+    def _set_mode(self, mode):
+        self.btn_editor.setChecked(mode == "editor")
+        self.btn_split.setChecked(mode == "split")
+        self.btn_preview.setChecked(mode == "preview")
+
+        if mode == "editor":
+            self._editor_container.show()
+            self.web_view.hide()
+        elif mode == "preview":
+            self._editor_container.hide()
+            self.web_view.show()
+            self._render_preview()
+        else:  # split
+            self._editor_container.show()
+            self.web_view.show()
+            self.splitter.setSizes([500, 500])

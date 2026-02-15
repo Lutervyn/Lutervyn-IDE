@@ -15,7 +15,8 @@ from PyQt6.Qsci import (QsciScintilla, QsciLexerPython, QsciLexerJSON,
                           QsciLexerMarkdown, QsciLexerBash, QsciLexerBatch,
                           QsciLexerYAML, QsciLexerSQL, QsciLexerXML)
 from app.ui.media_widgets import (ImagePreviewWidget, SVGPreviewWidget, 
-                                  VideoPreviewWidget, JSONPreviewWidget)
+                                  VideoPreviewWidget, JSONPreviewWidget,
+                                  MarkdownPreviewWidget)
 
 
 # Map file extensions to lexer classes
@@ -371,6 +372,99 @@ class CodeEditorWidget(QsciScintilla):
             for i in range(40):
                 lexer.setPaper(QColor(t['editor_bg']), i)
                 lexer.setFont(font, i)
+
+        # ── Markdown syntax colors — VS Code Dark+ style ──
+        if isinstance(lexer, QsciLexerMarkdown):
+            t = self.theme
+
+            # Markdown base font — readable proportional font, not monospace
+            md_font = QFont("Segoe UI", 12)
+            md_font.setFamilies(["Segoe UI", "Helvetica Neue", "Arial", "sans-serif"])
+            lexer.setDefaultFont(md_font)
+
+            # Default text — normal readable white
+            lexer.setColor(QColor("#D4D4D4"), QsciLexerMarkdown.Default)
+
+            # Headings — blue, bold, larger sizes
+            h1_font = QFont("Segoe UI", 20, QFont.Weight.Bold)
+            h2_font = QFont("Segoe UI", 17, QFont.Weight.Bold)
+            h3_font = QFont("Segoe UI", 15, QFont.Weight.Bold)
+            h4_font = QFont("Segoe UI", 13, QFont.Weight.Bold)
+            h5_font = QFont("Segoe UI", 12, QFont.Weight.Bold)
+            h6_font = QFont("Segoe UI", 11, QFont.Weight.Bold)
+            heading_color = QColor("#569CD6")
+            for h_style, h_font in [
+                (QsciLexerMarkdown.Header1, h1_font),
+                (QsciLexerMarkdown.Header2, h2_font),
+                (QsciLexerMarkdown.Header3, h3_font),
+                (QsciLexerMarkdown.Header4, h4_font),
+                (QsciLexerMarkdown.Header5, h5_font),
+                (QsciLexerMarkdown.Header6, h6_font),
+            ]:
+                lexer.setColor(heading_color, h_style)
+                lexer.setFont(h_font, h_style)
+
+            # Bold — orange, bold
+            md_bold = QFont("Segoe UI", 12, QFont.Weight.Bold)
+            lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.StrongEmphasisAsterisks)
+            lexer.setFont(md_bold, QsciLexerMarkdown.StrongEmphasisAsterisks)
+            lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.StrongEmphasisUnderscores)
+            lexer.setFont(md_bold, QsciLexerMarkdown.StrongEmphasisUnderscores)
+
+            # Italic — light green, italic
+            md_italic = QFont("Segoe UI", 12)
+            md_italic.setItalic(True)
+            lexer.setColor(QColor("#B5CEA8"), QsciLexerMarkdown.EmphasisAsterisks)
+            lexer.setFont(md_italic, QsciLexerMarkdown.EmphasisAsterisks)
+            lexer.setColor(QColor("#B5CEA8"), QsciLexerMarkdown.EmphasisUnderscores)
+            lexer.setFont(md_italic, QsciLexerMarkdown.EmphasisUnderscores)
+
+            # Links — teal
+            lexer.setColor(QColor("#4EC9B0"), QsciLexerMarkdown.Link)
+            lexer.setFont(md_font, QsciLexerMarkdown.Link)
+
+            # Code (backticks) — monospace for code, orange
+            code_font = QFont("Cascadia Code", 11)
+            code_font.setFamilies(["Cascadia Code", "Consolas", "Fira Code", "Courier New", "monospace"])
+            lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.CodeBackticks)
+            lexer.setFont(code_font, QsciLexerMarkdown.CodeBackticks)
+            lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.CodeDoubleBackticks)
+            lexer.setFont(code_font, QsciLexerMarkdown.CodeDoubleBackticks)
+            lexer.setColor(QColor("#CE9178"), QsciLexerMarkdown.CodeBlock)
+            lexer.setFont(code_font, QsciLexerMarkdown.CodeBlock)
+
+            # Lists — purple
+            lexer.setColor(QColor("#C586C0"), QsciLexerMarkdown.UnorderedListItem)
+            lexer.setFont(md_font, QsciLexerMarkdown.UnorderedListItem)
+            lexer.setColor(QColor("#C586C0"), QsciLexerMarkdown.OrderedListItem)
+            lexer.setFont(md_font, QsciLexerMarkdown.OrderedListItem)
+
+            # Block quotes — green
+            lexer.setColor(QColor("#6A9955"), QsciLexerMarkdown.BlockQuote)
+            md_italic_quote = QFont("Segoe UI", 12)
+            md_italic_quote.setItalic(True)
+            lexer.setFont(md_italic_quote, QsciLexerMarkdown.BlockQuote)
+
+            # Strikeout — dimmed
+            lexer.setColor(QColor("#636366"), QsciLexerMarkdown.StrikeOut)
+            lexer.setFont(md_font, QsciLexerMarkdown.StrikeOut)
+
+            # Horizontal rule — dimmed
+            lexer.setColor(QColor("#636366"), QsciLexerMarkdown.HorizontalRule)
+            lexer.setFont(md_font, QsciLexerMarkdown.HorizontalRule)
+
+            # Special / Prechar — muted
+            lexer.setColor(QColor("#808080"), QsciLexerMarkdown.Special)
+            lexer.setFont(md_font, QsciLexerMarkdown.Special)
+            lexer.setColor(QColor("#808080"), QsciLexerMarkdown.Prechar)
+            lexer.setFont(md_font, QsciLexerMarkdown.Prechar)
+
+            # Default style font
+            lexer.setFont(md_font, QsciLexerMarkdown.Default)
+
+            # Set paper (background) for all Markdown styles
+            for i in range(25):
+                lexer.setPaper(QColor(t['editor_bg']), i)
 
         self.setLexer(lexer)
 
@@ -792,6 +886,16 @@ class EditorTabs(QWidget):
         elif ext == '.json':
             # Professional JSON tree view
             wrapper = JSONPreviewWidget(file_path, self.theme, self)
+        elif ext in ['.md', '.markdown']:
+            # Markdown split preview: editor on left, rendered HTML on right
+            editor = CodeEditorWidget(file_path, self.theme, self)
+            md_preview = MarkdownPreviewWidget(file_path, self.theme, editor_widget=editor, parent=self)
+            wrapper = md_preview
+            # Listen for modifications
+            editor.modificationChanged.connect(
+                lambda mod, fp=file_path: self._on_modified(fp, mod))
+            # Apply stored extension theme
+            self._apply_stored_extension_theme(editor, None)
         else:
             # 2. Default Code Editor
             editor = CodeEditorWidget(file_path, self.theme, self)
@@ -911,6 +1015,8 @@ class EditorTabs(QWidget):
         widget = self.tabs.currentWidget()
         if isinstance(widget, EditorWithMinimap):
             return widget.editor
+        if isinstance(widget, MarkdownPreviewWidget):
+            return widget.editor
         if isinstance(widget, CodeEditorWidget):
             return widget
         return None
@@ -919,6 +1025,8 @@ class EditorTabs(QWidget):
         widget = self.tabs.currentWidget()
         if isinstance(widget, EditorWithMinimap):
             return widget.editor.file_path
+        if isinstance(widget, MarkdownPreviewWidget):
+            return widget.file_path
         if hasattr(widget, "file_path"):
             return widget.file_path
         return None

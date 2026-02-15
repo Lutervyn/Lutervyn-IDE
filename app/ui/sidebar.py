@@ -597,6 +597,7 @@ class ProjectSection(QWidget):
     def __init__(self, path: str, theme: dict, parent=None):
         super().__init__(parent)
         self.theme = theme
+        self._parent_panel = parent
         self._root_path = os.path.normpath(path)
         self.creating_parent = None
         self.editing_index = None
@@ -848,8 +849,18 @@ class ProjectSection(QWidget):
         menu.addAction("Copy Path", lambda: QApplication.clipboard().setText(path))
         menu.addAction("Copy Relative Path", lambda: self.cmd_copy_relative_path(path))
         menu.addAction("Copy Name", lambda: QApplication.clipboard().setText(os.path.basename(path)))
+        menu.addSeparator()
+
+        # 6. Clipboard Actions (Logical)
+        menu.addAction("Cut", lambda: self.cmd_cut(path)).setEnabled(index.isValid())
+        menu.addAction("Copy", lambda: self.cmd_copy(path)).setEnabled(index.isValid())
         
-        # 6. Editing
+        # Paste is only enabled if we are over a directory or at root, and there's something in clipboard
+        can_paste = self._parent_panel._clipboard_source is not None and is_dir
+        paste_act = menu.addAction("Paste", lambda: self.cmd_paste(path))
+        paste_act.setEnabled(can_paste)
+
+        # 7. Editing
         if index.isValid():
             menu.addSeparator()
             menu.addAction("Rename", lambda: self.cmd_rename(index))
@@ -899,7 +910,57 @@ class ProjectSection(QWidget):
                 else:
                     os.remove(path)
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not delete: {e}")
+                QMessageBox.critical(self, "Delete Error", f"Could not delete: {e}")
+
+    def cmd_copy(self, path):
+        self._parent_panel._clipboard_source = path
+        self._parent_panel._clipboard_op = 'copy'
+
+    def cmd_cut(self, path):
+        self._parent_panel._clipboard_source = path
+        self._parent_panel._clipboard_op = 'cut'
+
+    def cmd_paste(self, dest_dir):
+        source = self._parent_panel._clipboard_source
+        op = self._parent_panel._clipboard_op
+        if not source or not os.path.exists(source):
+            return
+
+        base = os.path.basename(source)
+        dest = os.path.join(dest_dir, base)
+
+        # Avoid pasting into self or child
+        if os.path.abspath(dest_dir).startswith(os.path.abspath(source)):
+            QMessageBox.warning(self, "Paste Error", "Cannot paste a folder into itself or its subfolder.")
+            return
+
+        # Collision handling
+        if os.path.exists(dest):
+            if op == 'cut' and os.path.abspath(source) == os.path.abspath(dest):
+                return # Same place
+            
+            name, ext = os.path.splitext(base)
+            counter = 1
+            while os.path.exists(dest):
+                dest = os.path.join(dest_dir, f"{name} (Copy {counter}){ext}" if counter > 1 else f"{name} (Copy){ext}")
+                counter += 1
+
+        try:
+            import shutil
+            if op == 'copy':
+                if os.path.isdir(source):
+                    shutil.copytree(source, dest)
+                else:
+                    shutil.copy2(source, dest)
+            else: # cut
+                # Close file if it's open (releases lock for move)
+                self.file_close_requested.emit(source)
+                shutil.move(source, dest)
+                # Clear cut state
+                self._parent_panel._clipboard_source = None
+                self._parent_panel._clipboard_op = None
+        except Exception as e:
+            QMessageBox.critical(self, "Paste Error", f"Could not paste: {e}")
 
     def cmd_reveal(self, path):
         if not path or not os.path.exists(path): return
@@ -1061,6 +1122,10 @@ class FileExplorerPanel(QWidget):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
+
+        # Shared clipboard for all projects
+        self._clipboard_source = None # path
+        self._clipboard_op = None     # 'copy' or 'cut'
 
         # 1. Main Header
         self.header = SidebarHeader("Explorer", theme, self)
