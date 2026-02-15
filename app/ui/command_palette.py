@@ -4,8 +4,7 @@ Centered, rounded, and modern.
 """
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLineEdit, QListWidget,
-                              QListWidgetItem, QGraphicsDropShadowEffect,
-                              QWidget)
+                              QListWidgetItem, QGraphicsDropShadowEffect)
 from PyQt6.QtCore import pyqtSignal, Qt, QEvent
 from PyQt6.QtGui import QFont, QColor, QKeyEvent
 

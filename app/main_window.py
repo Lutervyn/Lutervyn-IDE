@@ -18,6 +18,7 @@ from app.core.runner import PythonRunner
 from app.ui.help_dialogs import (KeyboardShortcutsDialog, ReleaseNotesDialog,
                                   ReportIssueDialog, DeveloperToolsDialog,
                                   WelcomePageTab)
+from app.core.config import config
 
 
 class MainWindow(QMainWindow):
@@ -73,6 +74,10 @@ class MainWindow(QMainWindow):
         self.runner.error_received.connect(lambda t: self.panel.output.append_output(t))
         self.runner.finished.connect(self._on_run_finished)
         self.editor_tabs.tabs.currentChanged.connect(self._on_tab_changed)
+        self.editor_tabs.tabs_changed.connect(self._on_tabs_collection_changed)
+        
+        # Restore last workspace if nothing was passed via CLI
+        QTimer.singleShot(0, self._restore_state)
 
     def _set_app_icon(self):
         logo_path = os.path.join(
@@ -216,6 +221,8 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar(self.theme, self)
         self.sidebar.file_opened.connect(self._open_file)
         self.sidebar.terminal_requested.connect(self._on_terminal_requested)
+        self.sidebar.find_in_folder_requested.connect(self._on_find_in_folder)
+        self.sidebar.workspace_action_requested.connect(self._on_workspace_action)
         # self.sidebar.setFixedWidth(280) # Removed to allow resizing
         self.sidebar.setMinimumWidth(50) # Allow shrinking
 
@@ -391,6 +398,14 @@ class MainWindow(QMainWindow):
             self.sidebar.set_root_folder(folder)
             self.sidebar.switch_view("explorer")
             self.setWindowTitle(f"{os.path.basename(folder)} - {self.APP_NAME}")
+            # Save for next launch
+            config.set("last_folder", folder)
+
+    def cmd_add_folder_to_workspace(self):
+        """Pick a folder and add it to the existing workspace view."""
+        path = QFileDialog.getExistingDirectory(self, "Add Folder to Workspace", self._current_folder or "")
+        if path:
+            self.sidebar.explorer_panel.add_root_folder(path)
 
     def cmd_save(self):
         editor = self.editor_tabs.get_current_editor()
@@ -460,6 +475,7 @@ class MainWindow(QMainWindow):
         self._dark_mode = not self._dark_mode
         self.theme = get_theme(dark=self._dark_mode)
         self.setStyleSheet(build_stylesheet(self.theme))
+        config.set("theme_dark", self._dark_mode)
 
     def cmd_run_file(self):
         file_path = self.editor_tabs.get_current_file_path()
@@ -583,6 +599,19 @@ class MainWindow(QMainWindow):
             f"<br>"
             f"<p style=\"color: gray;\">© 2026 Lutervyn</p>")
 
+    def _restore_state(self):
+        """Restore last session state (folder, theme, etc.)."""
+        # Only restore folder if nothing was passed on command line
+        if len(sys.argv) <= 1:
+            last_folder = config.get("last_folder")
+            if last_folder and os.path.exists(last_folder):
+                self.cmd_open_folder_path(last_folder)
+        
+        # Restore dark/light theme
+        is_dark = config.get("theme_dark", True)
+        if is_dark != self._dark_mode:
+            self.cmd_toggle_theme()
+
     def _open_file(self, file_path):
         if file_path and os.path.isfile(file_path):
             self.editor_tabs.open_file(file_path)
@@ -590,12 +619,38 @@ class MainWindow(QMainWindow):
             self._update_language(file_path)
 
     def _on_terminal_requested(self, path):
-        """Open a terminal at the specified path."""
-        self.cmd_new_terminal()
-        if os.path.isdir(path):
-            self.panel.terminal.run_command(f'cd "{path}"')
-        else:
-            self.panel.terminal.run_command(f'cd "{os.path.dirname(path)}"')
+        """Open a NEW terminal at the specified path."""
+        # Ensure panel is visible and on Terminal tab
+        self.panel.show_terminal()
+        
+        # Determine strict folder path
+        target_dir = path if os.path.isdir(path) else os.path.dirname(path)
+        
+        # Create NEW terminal instance in that folder (VS Code style)
+        self.panel.terminal_container.add_terminal(cwd=target_dir)
+
+    def _on_find_in_folder(self, path):
+        """Switch to search sidebar and set 'files to include'."""
+        self._switch_sidebar("search")
+        # TODO: Search sidebar API might need update to set filter programmatically
+        # For now, just switch. Ideally: self.sidebar.search_panel.set_include_filter(path)
+        pass
+
+    def _on_workspace_action(self, action, path):
+        """Handle workspace actions (add/remove folder)."""
+        if action == "add_folder":
+            self.cmd_add_folder_to_workspace()
+        elif action == "remove_folder":
+            self.sidebar.explorer_panel.remove_root_folder(path)
+        """Open a NEW terminal at the specified path."""
+        # Ensure panel is visible and on Terminal tab
+        self.panel.show_terminal()
+        
+        # Determine strict folder path
+        target_dir = path if os.path.isdir(path) else os.path.dirname(path)
+        
+        # Create NEW terminal instance in that folder (VS Code style)
+        self.panel.terminal_container.add_terminal(cwd=target_dir)
 
     def _update_title(self, file_path):
         name = os.path.basename(file_path)
@@ -621,6 +676,24 @@ class MainWindow(QMainWindow):
         if editor and editor.file_path:
             self._update_title(editor.file_path)
             self._update_language(editor.file_path)
+            self.sidebar.explorer_panel.highlight_file(editor.file_path)
+        self._on_tabs_collection_changed()
+
+    def _on_tabs_collection_changed(self):
+        """Update the sidebar's Open Editors list with all currently open files."""
+        open_files = []
+        for i in range(self.editor_tabs.tabs.count()):
+            widget = self.editor_tabs.tabs.widget(i)
+            # Handle welcome tab (don't show it in open editors)
+            if hasattr(widget, "editor"):
+                path = widget.editor.file_path
+                if path:
+                    open_files.append(path)
+            elif hasattr(widget, "file_path"): # Just in case
+                if widget.file_path:
+                    open_files.append(widget.file_path)
+        
+        self.sidebar.explorer_panel.sync_open_editors(open_files)
 
     def _on_run_finished(self, exit_code, status):
         if exit_code == 0:

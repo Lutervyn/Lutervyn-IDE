@@ -154,27 +154,24 @@ class CustomTitleBar(QWidget):
 
         # === Menu bar (embedded) ===
         self.menu_bar = QMenuBar()
+        self.menu_bar.setNativeMenuBar(False) # CRITICAL: Force in-window rendering
         self.menu_bar.setFixedHeight(30)
-        self.menu_bar.setNativeMenuBar(False)
-        self.menu_bar.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum) # Expand if needed
-        # Explicit styles for menu items
+        self.menu_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        
+        # Ensure text is visible on black background
         self.menu_bar.setStyleSheet(f"""
             QMenuBar {{
                 background-color: transparent;
-                border: none;
-                margin: 0px;
-                padding: 0px;
+                color: {theme['text_primary']};
+                font-family: 'Segoe UI';
+                font-size: 13px;
             }}
             QMenuBar::item {{
-                background-color: transparent;
-                color: {theme['titlebar_fg']};
-                padding: 6px 12px;
-                border-radius: 4px;
+                background: transparent;
+                color: {theme['text_primary']};
+                padding: 4px 10px;
             }}
             QMenuBar::item:selected {{
-                background-color: {theme['bg_hover']};
-            }}
-            QMenuBar::item:pressed {{
                 background-color: {theme['bg_hover']};
             }}
         """)

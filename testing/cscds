@@ -1,0 +1,7 @@
+        'M': '#e2c08d',   # Modified  – tan/yellow
+        'A': '#73c991',   # Added     – green
+        'D': '#c74e39',   # Deleted   – red
+        'U': '#73c991',   # Untracked – green
+        'R': '#4ec9b0',   # Renamed   – teal
+        'C': '#4ec9b0',   # Copied    – teal
+        '?': '#73c991',   # Unknown 

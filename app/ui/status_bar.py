@@ -1,12 +1,16 @@
 """
 Status Bar - The bar at the very bottom of the IDE (like VS Code).
 Shows: branch info, line/col, encoding, language, indent, notifications.
+
+The problems counter uses VS Code exact colors:
+  Error = #f14c4c (red)   Warning = #cca700 (yellow)
 """
 
+import os
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QSizePolicy,
                               QPushButton)
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QFont, QColor, QPainter, QMouseEvent
+from PyQt6.QtCore import pyqtSignal, Qt, QSize
+from PyQt6.QtGui import QFont, QColor, QPainter, QMouseEvent, QIcon
 
 
 class StatusBarItem(QLabel):
@@ -52,9 +56,59 @@ class StatusBar(QWidget):
         self.branch_item = StatusBarItem("⎇ main", theme, self)
         layout.addWidget(self.branch_item)
 
-        # Errors / Warnings
-        self.problems_item = StatusBarItem("❌ 0  ⚠ 0", theme, self)
-        layout.addWidget(self.problems_item)
+        # Errors / Warnings  (VS Code uses coloured icons)
+        self._icons_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "assets", "icons"
+        )
+        self.problems_widget = QWidget()
+        self.problems_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        pw_layout = QHBoxLayout(self.problems_widget)
+        pw_layout.setContentsMargins(8, 0, 8, 0)
+        pw_layout.setSpacing(3)
+
+        # Error icon + count
+        err_icon_path = os.path.join(self._icons_dir, "problem_error.svg")
+        self.err_icon_label = QLabel()
+        if os.path.exists(err_icon_path):
+            self.err_icon_label.setPixmap(QIcon(err_icon_path).pixmap(QSize(12, 12)))
+        else:
+            self.err_icon_label.setText("✕")
+            self.err_icon_label.setStyleSheet("color: #f14c4c; font-size: 11px;")
+        self.err_icon_label.setFixedSize(14, 14)
+        pw_layout.addWidget(self.err_icon_label)
+
+        self.err_count_label = QLabel("0")
+        self.err_count_label.setStyleSheet(f"color: {theme['statusbar_fg']}; font-size: 11px; background: transparent;")
+        pw_layout.addWidget(self.err_count_label)
+
+        pw_layout.addSpacing(4)
+
+        # Warning icon + count
+        warn_icon_path = os.path.join(self._icons_dir, "problem_warning.svg")
+        self.warn_icon_label = QLabel()
+        if os.path.exists(warn_icon_path):
+            self.warn_icon_label.setPixmap(QIcon(warn_icon_path).pixmap(QSize(12, 12)))
+        else:
+            self.warn_icon_label.setText("⚠")
+            self.warn_icon_label.setStyleSheet("color: #cca700; font-size: 11px;")
+        self.warn_icon_label.setFixedSize(14, 14)
+        pw_layout.addWidget(self.warn_icon_label)
+
+        self.warn_count_label = QLabel("0")
+        self.warn_count_label.setStyleSheet(f"color: {theme['statusbar_fg']}; font-size: 11px; background: transparent;")
+        pw_layout.addWidget(self.warn_count_label)
+
+        self.problems_widget.setStyleSheet(f"""
+            QWidget {{
+                background: transparent;
+                border-right: 1px solid {theme.get('bg_light', '#333333')};
+            }}
+            QWidget:hover {{
+                background-color: {theme['statusbar_hover_bg']};
+            }}
+        """)
+        layout.addWidget(self.problems_widget)
 
         # Spacer
         layout.addStretch()
@@ -97,7 +151,8 @@ class StatusBar(QWidget):
         self.branch_item.setText(f"⎇ {branch}")
 
     def update_problems(self, errors: int, warnings: int):
-        self.problems_item.setText(f"❌ {errors}  ⚠ {warnings}")
+        self.err_count_label.setText(str(errors))
+        self.warn_count_label.setText(str(warnings))
 
     def paintEvent(self, event):
         p = QPainter(self)

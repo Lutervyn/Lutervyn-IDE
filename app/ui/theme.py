@@ -45,10 +45,10 @@ DARK_THEME = {
     "sidebar_header_fg": "#aeaeb2",
 
     # Editor
-    "editor_bg": "#000000",      # Pure black for contrast often looks better on OLED/Modern
+    "editor_bg": "#000000",      # Pure black
     "editor_fg": "#d1d1d6",
     "editor_line_highlight": "#1c1c1e",
-    "editor_selection": "#2c2c2e", # Subtle gray for selection
+    "editor_selection": "#2c2c2e",
     "editor_gutter_bg": "#000000",
     "editor_gutter_fg": "#636366",
 
@@ -98,18 +98,36 @@ DARK_THEME = {
     "breadcrumb_bg": "#000000",
     "breadcrumb_fg": "#aeaeb2",
 
-    # Syntax colors (Defaulting to standard VS Code Dark+)
-    "syntax_keyword": "#ffffff",    # Monochrome White
-    "syntax_string": "#ce9178",
-    "syntax_number": "#b5cea8",
-    "syntax_comment": "#6a9955",
-    "syntax_function": "#dcdcaa",
-    "syntax_class": "#4ec9b0",
-    "syntax_variable": "#ffffff",   # Monochrome White
-    "syntax_operator": "#d4d4d4",
-    "syntax_decorator": "#dcdcaa",
-    "syntax_builtin": "#4ec9b0",
-    "syntax_self": "#ffffff",
+    # Syntax colors — VS Code Dark+ exact palette (from official theme JSON)
+    "syntax_keyword": "#c586c0",    # PURPLE (keyword.control: if/for/while/return/import/from…)
+    "syntax_keyword2": "#569cd6",   # BLUE (storage: def/class, variable.language: self, constant.language: None/True/False)
+    "syntax_string": "#ce9178",     # orange-brown (strings)
+    "syntax_number": "#b5cea8",     # light green (numbers)
+    "syntax_comment": "#6a9955",    # green (comments)
+    "syntax_function": "#dcdcaa",   # yellow (entity.name.function)
+    "syntax_class": "#4ec9b0",      # teal (support.class / entity.name.type)
+    "syntax_variable": "#9cdcfe",   # light-blue (variable)
+    "syntax_operator": "#d4d4d4",   # light gray (keyword.operator)
+    "syntax_decorator": "#dcdcaa",  # yellow (decorators)
+    "syntax_builtin": "#4ec9b0",    # teal (built-in types)
+    "syntax_self": "#569cd6",       # blue (variable.language)
+
+    # Problems panel (VS Code exact colors)
+    "problem_error": "#f14c4c",
+    "problem_warning": "#cca700",
+    "problem_info": "#3794ff",
+    "problem_file_fg": "#cccccc",
+    "problem_msg_fg": "#cccccc",
+    "problem_source_fg": "#858585",
+    "problem_position_fg": "#858585",
+
+    # Git / Source Control (VS Code exact colors)
+    "git_modified": "#e2c08d",
+    "git_added": "#73c991",
+    "git_deleted": "#c74e39",
+    "git_untracked": "#73c991",
+    "git_renamed": "#4ec9b0",
+    "git_conflict": "#e4676b",
 }
 
 LIGHT_THEME = {
@@ -186,6 +204,23 @@ LIGHT_THEME = {
     "syntax_decorator": "#795e26",
     "syntax_builtin": "#267f99",
     "syntax_self": "#0000ff",
+
+    # Problems panel (VS Code light theme colors)
+    "problem_error": "#e51400",
+    "problem_warning": "#bf8803",
+    "problem_info": "#1a85ff",
+    "problem_file_fg": "#1e1e1e",
+    "problem_msg_fg": "#1e1e1e",
+    "problem_source_fg": "#616161",
+    "problem_position_fg": "#616161",
+
+    # Git / Source Control
+    "git_modified": "#c6a029",
+    "git_added": "#2ea043",
+    "git_deleted": "#c74e39",
+    "git_untracked": "#2ea043",
+    "git_renamed": "#4ec9b0",
+    "git_conflict": "#e4676b",
 }
 
 
@@ -251,21 +286,22 @@ def build_stylesheet(theme: dict) -> str:
         margin: 4px 10px;
     }}
     
-    /* ===== SCROLLBAR (VS Code Style) ===== */
+    /* ===== SCROLLBAR (VS Code Style — thin, only visible on hover) ===== */
     QScrollBar:vertical {{
         background: transparent;
-        width: 12px;
+        width: 14px;
         margin: 0;
     }}
     QScrollBar::handle:vertical {{
-        background: {theme['scrollbar_thumb']};
+        background: rgba(121, 121, 121, 0.4);
         min-height: 20px;
         border-radius: 0px; 
-        margin: 2px;
-        margin-left: 4px; /* Move it to the right like VS Code */
+        margin: 0px;
+        margin-left: 7px; /* Thin bar pushed right — 7px wide */
     }}
     QScrollBar::handle:vertical:hover {{
-        background: {theme['scrollbar_thumb_hover']};
+        background: rgba(121, 121, 121, 0.7);
+        margin-left: 4px; /* Wider on hover */
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0px;
@@ -277,18 +313,19 @@ def build_stylesheet(theme: dict) -> str:
 
     QScrollBar:horizontal {{
         background: transparent;
-        height: 12px;
+        height: 14px;
         margin: 0;
     }}
     QScrollBar::handle:horizontal {{
-        background: {theme['scrollbar_thumb']};
+        background: rgba(121, 121, 121, 0.4);
         min-width: 20px;
         border-radius: 0px;
-        margin: 2px;
-        margin-top: 4px;
+        margin: 0px;
+        margin-top: 7px;
     }}
     QScrollBar::handle:horizontal:hover {{
-        background: {theme['scrollbar_thumb_hover']};
+        background: rgba(121, 121, 121, 0.7);
+        margin-top: 4px;
     }}
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
         width: 0px;
@@ -322,6 +359,31 @@ def build_stylesheet(theme: dict) -> str:
     }}
     QTreeView::branch {{
         background-color: {theme['sidebar_bg']};
+        border-image: none;
+        image: none;
+        border: none;
+    }}
+    QTreeView::branch:has-siblings:!adjoins-item {{
+        border-image: none;
+        image: none;
+    }}
+    QTreeView::branch:has-siblings:adjoins-item {{
+        border-image: none;
+        image: none;
+    }}
+    QTreeView::branch:!has-children:!has-siblings:adjoins-item {{
+        border-image: none;
+        image: none;
+    }}
+    QTreeView::branch:has-children:!has-siblings:closed,
+    QTreeView::branch:closed:has-children:has-siblings {{
+        image: none;
+        border-image: none;
+    }}
+    QTreeView::branch:open:has-children:!has-siblings,
+    QTreeView::branch:open:has-children:has-siblings {{
+        image: none;
+        border-image: none;
     }}
     QHeaderView::section {{
         background-color: {theme['sidebar_header_bg']};
