@@ -6,7 +6,7 @@ Layout: [Logo] [Menus...] [spacer] [Search Bar] [spacer] [Min] [Max] [Close]
 import os
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton,
                               QMenuBar, QMenu, QSizePolicy, QLineEdit)
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRect
 from PyQt6.QtGui import (QPixmap, QFont, QColor, QPainter, QMouseEvent,
                           QPen)
 
@@ -18,9 +18,15 @@ class TitleBarButton(QPushButton):
         super().__init__(parent)
         self.icon_type = icon_type
         self.theme = theme
+        self.active = False
         self._hovered = False
         self.setFixedSize(46, 30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_active(self, state: bool):
+        if self.active != state:
+            self.active = state
+            self.update()
 
     def enterEvent(self, event):
         self._hovered = True
@@ -44,7 +50,10 @@ class TitleBarButton(QPushButton):
                 painter.fillRect(self.rect(), QColor(self.theme['bg_hover']))
 
         # Draw icon
-        pen_color = "#ffffff" if (self._hovered and self.icon_type == "close") else self.theme['text_primary']
+        base_color = self.theme['text_primary']
+        accent_color = self.theme['accent']
+        pen_color = "#ffffff" if (self._hovered and self.icon_type == "close") else base_color
+        
         painter.setPen(QPen(QColor(pen_color), 1))
 
         cx = self.width() // 2
@@ -67,6 +76,33 @@ class TitleBarButton(QPushButton):
             # X mark ✕
             painter.drawLine(cx - 4, cy - 4, cx + 4, cy + 4)
             painter.drawLine(cx + 4, cy - 4, cx - 4, cy + 4)
+
+        elif self.icon_type in ["sidebar_left", "sidebar_right", "panel_bottom"]:
+            # VS Code style layout icons with FILL state
+            rect = QRect(cx - 8, cy - 6, 16, 12)
+            
+            # Draw main outline
+            painter.setPen(QPen(QColor(base_color), 1))
+            painter.drawRoundedRect(rect, 1, 1)
+
+            # Draw divider and fill based on type
+            if self.icon_type == "sidebar_left":
+                # Sidebar divider
+                painter.drawLine(cx - 3, cy - 6, cx - 3, cy + 5)
+                if self.active:
+                    painter.fillRect(cx - 7, cy - 5, 4, 11, QColor(accent_color))
+            
+            elif self.icon_type == "sidebar_right":
+                # AI Sidebar divider
+                painter.drawLine(cx + 3, cy - 6, cx + 3, cy + 5)
+                if self.active:
+                    painter.fillRect(cx + 4, cy - 5, 4, 11, QColor(accent_color))
+            
+            elif self.icon_type == "panel_bottom":
+                # Panel divider
+                painter.drawLine(cx - 8, cy + 2, cx + 7, cy + 2)
+                if self.active:
+                    painter.fillRect(cx - 7, cy + 3, 15, 3, QColor(accent_color))
 
         painter.end()
 
@@ -119,6 +155,9 @@ class CustomTitleBar(QWidget):
     minimize_clicked = pyqtSignal()
     maximize_clicked = pyqtSignal()
     close_clicked = pyqtSignal()
+    toggle_sidebar_left = pyqtSignal()
+    toggle_panel_bottom = pyqtSignal()
+    toggle_sidebar_right = pyqtSignal()
 
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
@@ -186,6 +225,25 @@ class CustomTitleBar(QWidget):
 
         # === Right Spacer ===
         layout.addStretch(1)
+
+        # === Layout Toggles ===
+        self.btn_sidebar_left = TitleBarButton("sidebar_left", theme, self)
+        self.btn_sidebar_left.setToolTip("Toggle Sidebar (Ctrl+B)")
+        self.btn_sidebar_left.setFixedSize(36, 30)
+        self.btn_sidebar_left.clicked.connect(self.toggle_sidebar_left.emit)
+        layout.addWidget(self.btn_sidebar_left)
+
+        self.btn_panel_bottom = TitleBarButton("panel_bottom", theme, self)
+        self.btn_panel_bottom.setToolTip("Toggle Panel (Ctrl+J)")
+        self.btn_panel_bottom.setFixedSize(36, 30)
+        self.btn_panel_bottom.clicked.connect(self.toggle_panel_bottom.emit)
+        layout.addWidget(self.btn_panel_bottom)
+
+        self.btn_sidebar_right = TitleBarButton("sidebar_right", theme, self)
+        self.btn_sidebar_right.setToolTip("Toggle Lutervyn AI (Ctrl+Alt+A)")
+        self.btn_sidebar_right.setFixedSize(36, 30)
+        self.btn_sidebar_right.clicked.connect(self.toggle_sidebar_right.emit)
+        layout.addWidget(self.btn_sidebar_right)
 
         # === Window control buttons ===
         self.btn_minimize = TitleBarButton("minimize", theme, self)

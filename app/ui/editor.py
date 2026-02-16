@@ -8,7 +8,7 @@ import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
                               QLabel, QSizePolicy, QTabBar, QPushButton,
                               QScrollBar, QFrame)
-from PyQt6.QtCore import pyqtSignal, Qt, QFileInfo, QPoint, QTimer, QRect
+from PyQt6.QtCore import pyqtSignal, Qt, QFileInfo, QPoint, QTimer, QRect, QFileSystemWatcher
 from PyQt6.QtGui import QFont, QColor, QPainter, QMouseEvent, QPen, QBrush, QPixmap
 from PyQt6.Qsci import (QsciScintilla, QsciLexerPython, QsciLexerJSON,
                           QsciLexerHTML, QsciLexerCSS, QsciLexerJavaScript,
@@ -465,6 +465,7 @@ class CodeEditorWidget(QsciScintilla):
 
     def save_file(self):
         """Save the current file. Returns True if saved, False if cancelled or error."""
+        import os
         if self.file_path and os.path.isabs(self.file_path):
             try:
                 with open(self.file_path, "w", encoding="utf-8") as f:
@@ -476,10 +477,7 @@ class CodeEditorWidget(QsciScintilla):
                 return False
         
         # No path? We need to prompt. 
-        # But wait, better to let the parent (EditorTabs/MainWindow) handle the UI.
-        # However, for consistency, let's implement a robust local fallback.
         from PyQt6.QtWidgets import QFileDialog
-        import os
         
         # Try to find a sane directory
         cwd = os.getcwd()
@@ -500,9 +498,6 @@ class CodeEditorWidget(QsciScintilla):
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(self.text())
                 
-                # We need to update the tab too, but we don't have direct access to EditorTabs here easily
-                # without emitting a signal. Let's assume the caller will handle renaming.
-                # Actually, self.file_path is used by the tab.
                 self.file_path = file_path
                 self.setModified(False)
                 return True
@@ -858,6 +853,11 @@ class EditorTabs(QWidget):
         self.tabs.addTab(welcome, "Welcome")
         
         self._untitled_count = 0
+        
+        # File System Watcher for external changes
+        self.watcher = QFileSystemWatcher(self)
+        self.watcher.fileChanged.connect(self._on_file_changed_externally)
+        self._ignore_watcher = set() # Paths we are currently saving ourselves
 
     def new_file(self, language: str = None):
         """Create a new untitled file."""
@@ -948,6 +948,7 @@ class EditorTabs(QWidget):
 
         # Track it
         self._open_files[file_path] = index
+        self.watcher.addPath(file_path)
         self.tabs_changed.emit()
 
     def _apply_stored_extension_theme(self, editor, wrapper):
@@ -1049,6 +1050,8 @@ class EditorTabs(QWidget):
             
         if path:
             self._open_files.pop(path, None)
+            if path in self.watcher.files():
+                self.watcher.removePath(path)
 
         self.tabs.removeTab(index)
         if widget:
@@ -1117,6 +1120,8 @@ class EditorTabs(QWidget):
             self._on_modified(new_path, False, editor)
             # Trigger sync
             self.tabs_changed.emit()
+            # Update watcher
+            self.watcher.addPath(new_path)
 
 
     def get_current_editor(self) -> CodeEditorWidget | None:
@@ -1138,3 +1143,67 @@ class EditorTabs(QWidget):
         if hasattr(widget, "file_path"):
             return widget.file_path
         return None
+
+    def _on_file_changed_externally(self, path):
+        """Handle file change on disk."""
+        if path in self._ignore_watcher:
+            return
+
+        # Normalize
+        path = os.path.normpath(path)
+        if path not in self._open_files:
+            return
+
+        index = self._open_files[path]
+        widget = self.tabs.widget(index)
+        
+        editor = None
+        if hasattr(widget, "editor"):
+            editor = widget.editor
+        elif isinstance(widget, CodeEditorWidget):
+            editor = widget
+
+        if not editor:
+            return
+
+        # Use a small timer to avoid race conditions with external saves
+        QTimer.singleShot(100, lambda: self._handle_external_reload(path, editor))
+
+    def _handle_external_reload(self, path, editor):
+        if not os.path.exists(path):
+            return # Maybe deleted?
+
+        # Check if modified in our IDE
+        if not editor.isModified():
+            # Silent reload
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                editor.setText(content)
+                editor.setModified(False)
+                print(f"[EditorTabs] Silently reloaded {path} (external change)")
+            except Exception as e:
+                print(f"[EditorTabs] Error reloading {path}: {e}")
+        else:
+            # Prompt user
+            from PyQt6.QtWidgets import QMessageBox
+            tab_name = os.path.basename(path)
+            # Switch to the tab to show it
+            self.open_file(path)
+            
+            msg = QMessageBox(self)
+            msg.setWindowTitle("File Changed")
+            msg.setText(f"'{tab_name}' has been changed on disk.")
+            msg.setInformativeText("Do you want to reload it? Your unsaved changes will be lost.")
+            msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+            
+            if msg.exec() == QMessageBox.StandardButton.Yes:
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                    editor.setText(content)
+                    editor.setModified(False)
+                    print(f"[EditorTabs] Reloaded {path} after prompt")
+                except Exception as e:
+                    print(f"[EditorTabs] Error reloading {path}: {e}")

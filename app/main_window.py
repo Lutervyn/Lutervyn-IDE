@@ -14,6 +14,7 @@ from app.ui.editor import EditorTabs
 from app.ui.panel import BottomPanel
 from app.ui.status_bar import StatusBar
 from app.ui.command_palette import CommandPalette
+from app.ui.ai_panel import AiPanel
 from app.core.runner import PythonRunner
 from app.ui.help_dialogs import (KeyboardShortcutsDialog, ReleaseNotesDialog,
                                   ReportIssueDialog, DeveloperToolsDialog,
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         ("view.explorer", "View: Show Explorer"),
         ("view.search", "View: Show Search"),
         ("view.command_palette", "View: Command Palette"),
+        ("view.toggle_ai_sidebar", "View: Toggle Lutervyn AI"),
         ("run.run_file", "Run: Run Python File"),
         ("run.stop", "Run: Stop"),
         ("terminal.new", "Terminal: Create New Terminal"),
@@ -57,6 +59,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._dark_mode = True
         self._sidebar_visible = True
+        self._ai_panel_visible = False # Hidden by default
         self._panel_visible = True
         self._current_folder = None
         self._resize_edges = 0
@@ -75,6 +78,13 @@ class MainWindow(QMainWindow):
         self.runner.finished.connect(self._on_run_finished)
         self.editor_tabs.tabs.currentChanged.connect(self._on_tab_changed)
         self.editor_tabs.tabs_changed.connect(self._on_tabs_collection_changed)
+        self.editor_tabs.file_modified.connect(self._on_file_modified_sync)
+        
+        # Auto Save timer
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setSingleShot(True)
+        self._auto_save_timer.setInterval(1000) # 1 second delay
+        self._auto_save_timer.timeout.connect(self.cmd_save_all_auto)
         
         # Restore last workspace if nothing was passed via CLI
         QTimer.singleShot(0, self._restore_state)
@@ -131,9 +141,10 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         # Auto Save
-        auto_save_action = QAction("Auto Save", self)
-        auto_save_action.setCheckable(True)
-        file_menu.addAction(auto_save_action)
+        self.auto_save_action = QAction("Auto Save", self)
+        self.auto_save_action.setCheckable(True)
+        self.auto_save_action.triggered.connect(self.cmd_toggle_auto_save)
+        file_menu.addAction(self.auto_save_action)
         
         # Preferences
         pref_menu = file_menu.addMenu("Preferences")
@@ -193,6 +204,7 @@ class MainWindow(QMainWindow):
         appearance_menu = view_menu.addMenu("Appearance")
         self._add_action(appearance_menu, "Toggle Full Screen", "F11", self.cmd_toggle_fullscreen)
         self._add_action(appearance_menu, "Toggle Sidebar", "Ctrl+B", self.cmd_toggle_sidebar)
+        self._add_action(appearance_menu, "Toggle Lutervyn AI", "Ctrl+Alt+A", self.cmd_toggle_ai_panel)
         self._add_action(appearance_menu, "Toggle Panel", "Ctrl+J", self.cmd_toggle_panel)
         self._add_action(appearance_menu, "Toggle Theme", "", self.cmd_toggle_theme)
         view_menu.addSeparator()
@@ -259,6 +271,9 @@ class MainWindow(QMainWindow):
         self.title_bar.minimize_clicked.connect(self._on_minimize)
         self.title_bar.maximize_clicked.connect(self._on_maximize)
         self.title_bar.close_clicked.connect(self.close)
+        self.title_bar.toggle_sidebar_left.connect(self.cmd_toggle_sidebar)
+        self.title_bar.toggle_panel_bottom.connect(self.cmd_toggle_panel)
+        self.title_bar.toggle_sidebar_right.connect(self.cmd_toggle_ai_panel)
         root_layout.addWidget(self.title_bar)
         self._build_menus()
 
@@ -297,13 +312,23 @@ class MainWindow(QMainWindow):
         right_area.addWidget(self.panel)
         right_area.setSizes([500, 200])
 
+        self.ai_panel = AiPanel(self.theme, self)
+        self.ai_panel.setVisible(self._ai_panel_visible)
+
+        # Sync title bar icons with initial visibility
+        self.title_bar.btn_sidebar_left.set_active(self._sidebar_visible)
+        self.title_bar.btn_panel_bottom.set_active(self._panel_visible)
+        self.title_bar.btn_sidebar_right.set_active(self._ai_panel_visible)
+
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setHandleWidth(1)
         self.main_splitter.addWidget(self.sidebar)
         self.main_splitter.addWidget(right_area)
-        self.main_splitter.setSizes([280, 1100])
+        self.main_splitter.addWidget(self.ai_panel)
+        self.main_splitter.setSizes([280, 800, 300]) # Give AI panel some initial width
         self.main_splitter.setCollapsible(0, False) # Prevent sidebar from snapping/hiding on drag
         self.main_splitter.setCollapsible(1, False) # Prevent editor from snapping
+        self.main_splitter.setCollapsible(2, True)  # Allow AI panel to collapse
         
         # Ensure sidebar can be resized but has a sane minimum
         self.sidebar.setMinimumWidth(150)
@@ -636,11 +661,15 @@ class MainWindow(QMainWindow):
         editor = self.editor_tabs.get_current_editor()
         if editor:
             if editor.file_path:
+                path = editor.file_path
+                self.editor_tabs._ignore_watcher.add(path)
                 try:
                     editor.save_file()
                 except Exception as e:
                     from PyQt6.QtWidgets import QMessageBox
                     QMessageBox.critical(self, "Error", f"Could not save file: {e}")
+                finally:
+                    QTimer.singleShot(500, lambda p=path: self.editor_tabs._ignore_watcher.discard(p))
             else:
                 self.cmd_save_as()
 
@@ -682,14 +711,18 @@ class MainWindow(QMainWindow):
                     elif "Markdown" in selected_filter: file_path += ".md"
                     elif "JSON" in selected_filter: file_path += ".json"
                 
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(editor.text())
-                
-                # Update editor state
-                self.editor_tabs.set_current_file_path(file_path)
-                editor.setModified(False)
-                self.sidebar.explorer_panel.refresh()
-                self._sync_open_editors()
+                self.editor_tabs._ignore_watcher.add(file_path)
+                try:
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(editor.text())
+                    
+                    # Update editor state
+                    self.editor_tabs.set_current_file_path(file_path)
+                    editor.setModified(False)
+                    # Remove redundant explorer_panel.refresh() call here as well
+                    self._sync_open_editors()
+                finally:
+                    QTimer.singleShot(500, lambda p=file_path: self.editor_tabs._ignore_watcher.discard(p))
 
             except Exception as e:
                 from PyQt6.QtWidgets import QMessageBox
@@ -734,10 +767,19 @@ class MainWindow(QMainWindow):
     def cmd_toggle_sidebar(self):
         self._sidebar_visible = not self._sidebar_visible
         self.sidebar.setVisible(self._sidebar_visible)
+        self.title_bar.btn_sidebar_left.set_active(self._sidebar_visible)
+
+    def cmd_toggle_ai_panel(self):
+        self._ai_panel_visible = not self._ai_panel_visible
+        self.ai_panel.setVisible(self._ai_panel_visible)
+        self.title_bar.btn_sidebar_right.set_active(self._ai_panel_visible)
+        if self._ai_panel_visible:
+            self.ai_panel.input_edit.setFocus()
 
     def cmd_toggle_panel(self):
         self._panel_visible = not self._panel_visible
         self.panel.setVisible(self._panel_visible)
+        self.title_bar.btn_panel_bottom.set_active(self._panel_visible)
         if self._panel_visible:
             self.panel.show_terminal()
 
@@ -758,6 +800,51 @@ class MainWindow(QMainWindow):
             self.runner.run_file(file_path)
         else:
             self.panel.output.append_output("No Python file is currently open.\n")
+
+    def cmd_toggle_auto_save(self, enabled):
+        """Toggle auto save feature."""
+        config.set("auto_save", enabled)
+        if not enabled:
+            self._auto_save_timer.stop()
+        print(f"[MainWindow] Auto Save: {enabled}")
+
+    def _on_file_modified_sync(self, path, is_modified):
+        """Called whenever a file is modified."""
+        if self.auto_save_action.isChecked() and is_modified:
+            # Only trigger for files on disk (not untitled)
+            if path and os.path.isabs(path) and os.path.exists(path):
+                self._auto_save_timer.start()
+
+    def cmd_save_all_auto(self):
+        """Save all modified files that have a path on disk."""
+        print("[MainWindow] Auto-saving modified files...")
+        for i in range(self.editor_tabs.tabs.count()):
+            widget = self.editor_tabs.tabs.widget(i)
+            from app.ui.editor import CodeEditorWidget, EditorWithMinimap, MarkdownPreviewWidget
+            
+            editor = None
+            if isinstance(widget, EditorWithMinimap):
+                editor = widget.editor
+            elif isinstance(widget, MarkdownPreviewWidget):
+                editor = widget.editor
+            elif isinstance(widget, CodeEditorWidget):
+                editor = widget
+                
+            if editor and hasattr(editor, "isModified") and editor.isModified():
+                if editor.file_path and os.path.isabs(editor.file_path):
+                    path = editor.file_path
+                    self.editor_tabs._ignore_watcher.add(path)
+                    try:
+                        editor.save_file()
+                        print(f"  Saved: {path}")
+                    except Exception as e:
+                        print(f"  Failed to auto-save {path}: {e}")
+                    finally:
+                        # Shared delayed discard
+                        QTimer.singleShot(500, lambda p=path: self.editor_tabs._ignore_watcher.discard(p))
+        
+        # After saving, refresh tabs UI if needed
+        self._sync_open_editors()
 
     def cmd_stop(self):
         self.runner.stop()
@@ -881,6 +968,11 @@ class MainWindow(QMainWindow):
         is_dark = config.get("theme_dark", True)
         if is_dark != self._dark_mode:
             self.cmd_toggle_theme()
+            
+        # Restore auto save (defaulting to True per user request)
+        auto_save = config.get("auto_save", True)
+        self.auto_save_action.setChecked(auto_save)
+        print(f"[MainWindow] Restored Auto Save: {auto_save}")
 
     def _open_file(self, file_path):
         if file_path and os.path.isfile(file_path):

@@ -1345,6 +1345,10 @@ class FileExplorerPanel(QWidget):
         if self.projects: self.projects[0].cmd_new_folder()
     def _on_global_refresh(self):
         for p in self.projects: p.cmd_refresh()
+        
+    def refresh(self):
+        """Unified refresh method used by MainWindow."""
+        self._on_global_refresh()
     def _on_global_collapse(self):
         for p in self.projects: p.cmd_collapse_all()
 
