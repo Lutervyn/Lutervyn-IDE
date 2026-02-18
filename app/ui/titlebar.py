@@ -78,31 +78,31 @@ class TitleBarButton(QPushButton):
             painter.drawLine(cx + 4, cy - 4, cx - 4, cy + 4)
 
         elif self.icon_type in ["sidebar_left", "sidebar_right", "panel_bottom"]:
-            # VS Code style layout icons with FILL state
-            rect = QRect(cx - 8, cy - 6, 16, 12)
+            # Sharp rectangles, shorter proportions
+            rect = QRect(cx - 7, cy - 5, 14, 10)
             
             # Draw main outline
             painter.setPen(QPen(QColor(base_color), 1))
-            painter.drawRoundedRect(rect, 1, 1)
+            painter.drawRect(rect)
 
             # Draw divider and fill based on type
             if self.icon_type == "sidebar_left":
                 # Sidebar divider
-                painter.drawLine(cx - 3, cy - 6, cx - 3, cy + 5)
+                painter.drawLine(cx - 3, cy - 5, cx - 3, cy + 4)
                 if self.active:
-                    painter.fillRect(cx - 7, cy - 5, 4, 11, QColor(accent_color))
+                    painter.fillRect(cx - 6, cy - 4, 3, 9, QColor(accent_color))
             
             elif self.icon_type == "sidebar_right":
                 # AI Sidebar divider
-                painter.drawLine(cx + 3, cy - 6, cx + 3, cy + 5)
+                painter.drawLine(cx + 3, cy - 5, cx + 3, cy + 4)
                 if self.active:
-                    painter.fillRect(cx + 4, cy - 5, 4, 11, QColor(accent_color))
+                    painter.fillRect(cx + 4, cy - 4, 3, 9, QColor(accent_color))
             
             elif self.icon_type == "panel_bottom":
                 # Panel divider
-                painter.drawLine(cx - 8, cy + 2, cx + 7, cy + 2)
+                painter.drawLine(cx - 7, cy + 2, cx + 6, cy + 2)
                 if self.active:
-                    painter.fillRect(cx - 7, cy + 3, 15, 3, QColor(accent_color))
+                    painter.fillRect(cx - 6, cy + 3, 13, 2, QColor(accent_color))
 
         painter.end()
 

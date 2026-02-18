@@ -1,278 +1,465 @@
+"""
+Lutervyn AI Panel — Direct OpenRouter Integration
+No aider, no shims, no mocks. Pure stdlib + PyQt6.
+"""
+
 import os
 import sys
+import json
 import threading
-import importlib.resources
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, 
-                               QTextEdit, QPushButton, QLabel, QFrame, QScrollArea,
-                               QStackedWidget)
-from PyQt6.QtCore import pyqtSignal, Qt, QObject, QTimer, QSize, QRect
-from PyQt6.QtGui import QFont, QColor, QIcon, QPainter, QLinearGradient
+import urllib.request
+import urllib.error
 
-# --- DEPENDENCY SHIMS ---
-# Shim 'importlib_resources'
-try:
-    import importlib_resources
-except ImportError:
-    import importlib.resources as importlib_resources
-    sys.modules['importlib_resources'] = importlib_resources
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
+    QTextEdit, QPushButton, QLabel, QFrame, QScrollArea,
+    QSizePolicy, QComboBox
+)
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QObject, QPoint
+from PyQt6.QtGui import QFont, QColor, QPainter, QPolygon, QPen, QBrush
 
-# Shim 'shtab' (Aider uses it for shell completion, which we don't need in a GUI)
-try:
-    import shtab
-except ImportError:
-    class MockShtab:
-        def add_argument_to(self, *args, **kwargs): pass
-    sys.modules['shtab'] = MockShtab()
 
-# Add Aider paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-AIDER_PATH = os.path.join(BASE_DIR, "Ai integration")
-if AIDER_PATH not in sys.path:
-    sys.path.append(AIDER_PATH)
+# ── OpenRouter Client (stdlib only) ──────────────────────────────────────────
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_MODEL  = "openai/gpt-4o-mini"
+API_KEY        = "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"
 
-class MarkdownBubble(QTextBrowser):
-    """Custom text browser for markdown bubbles with better styling."""
+# Available models (display name → OpenRouter ID)
+MODELS = [
+    ("GPT-4o Mini",          "openai/gpt-4o-mini"),
+    ("GPT-4o",               "openai/gpt-4o"),
+    ("Claude 3.5 Sonnet",    "anthropic/claude-3.5-sonnet"),
+    ("Claude 3.5 Haiku",     "anthropic/claude-3.5-haiku"),
+    ("Gemini 2.0 Flash",     "google/gemini-2.0-flash-001"),
+    ("DeepSeek V3",          "deepseek/deepseek-chat"),
+    ("Llama 3.3 70B",        "meta-llama/llama-3.3-70b-instruct"),
+]
+
+SYSTEM_PROMPT = (
+    "You are Lutervyn AI, a helpful coding assistant embedded in the Lutervyn IDE. "
+    "You help users write, debug, and understand code. Be concise and helpful. "
+    "Format code blocks with triple backticks and specify the language."
+)
+
+
+def chat_completion(messages, model=DEFAULT_MODEL, on_chunk=None):
+    """
+    Send messages to OpenRouter and return the full response text.
+    If on_chunk is provided, stream chunks to it for live updates.
+    """
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "stream": on_chunk is not None,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(OPENROUTER_URL, data=payload, headers={
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type":  "application/json",
+        "HTTP-Referer":  "https://lutervyn.com",
+        "X-Title":       "Lutervyn IDE",
+    })
+
+    try:
+        resp = urllib.request.urlopen(req, timeout=60)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenRouter {e.code}: {body}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Network error: {e.reason}") from e
+
+    if on_chunk is None:
+        # ── Non-streaming ──
+        data = json.loads(resp.read().decode("utf-8"))
+        usage = data.get("usage", {})
+        return data["choices"][0]["message"]["content"], usage
+
+    # ── Streaming (SSE) ──
+    full = []
+    for raw_line in resp:
+        line = raw_line.decode("utf-8").strip()
+        if not line or not line.startswith("data: "):
+            continue
+        payload_str = line[6:]
+        if payload_str == "[DONE]":
+            break
+        try:
+            obj = json.loads(payload_str)
+            delta = obj["choices"][0].get("delta", {})
+            text = delta.get("content", "")
+            if text:
+                full.append(text)
+                on_chunk(text)
+        except (json.JSONDecodeError, KeyError, IndexError):
+            continue
+    return "".join(full), {}
+
+
+# ── Signal bridge (thread → GUI) ─────────────────────────────────────────────
+class _Signals(QObject):
+    chunk    = pyqtSignal(str)
+    done     = pyqtSignal(str, int, int)  # full_text, prompt_tokens, completion_tokens
+    error    = pyqtSignal(str)
+    status   = pyqtSignal(str)
+    credits  = pyqtSignal(str)
+
+
+# ── Markdown → HTML helper ───────────────────────────────────────────────────
+import re as _re
+
+def _md_to_html(md, fg="#fff"):
+    """Lightweight markdown to styled HTML."""
+    html = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # Code blocks
+    def _code_block(m):
+        code = m.group(2).strip()
+        return (
+            '<pre style="background:#1a1a2e; border-radius:6px; padding:10px; '
+            'font-family:Consolas,monospace; font-size:12px; color:#e0e0e0; '
+            f'margin:6px 0; overflow-x:auto;">{code}</pre>'
+        )
+    html = _re.sub(r'```(\w*)\n(.*?)```', _code_block, html, flags=_re.DOTALL)
+    # Inline code
+    html = _re.sub(r'`([^`]+)`',
+        r'<code style="background:#1a1a2e; padding:2px 5px; border-radius:3px; '
+        r'font-family:Consolas,monospace; font-size:12px; color:#e0e0e0;">\1</code>', html)
+    # Bold
+    html = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', html)
+    # Italic
+    html = _re.sub(r'\*(.+?)\*', r'<i>\1</i>', html)
+    # Bullet lists
+    html = _re.sub(r'^[-•] (.+)$', r'<div style="margin-left:12px;">• \1</div>', html, flags=_re.MULTILINE)
+    # Numbered lists
+    html = _re.sub(r'^(\d+)\. (.+)$', r'<div style="margin-left:12px;">\1. \2</div>', html, flags=_re.MULTILINE)
+    # Headers
+    html = _re.sub(r'^### (.+)$', r'<div style="font-size:14px; font-weight:bold; margin:6px 0;">\1</div>', html, flags=_re.MULTILINE)
+    html = _re.sub(r'^## (.+)$', r'<div style="font-size:15px; font-weight:bold; margin:8px 0;">\1</div>', html, flags=_re.MULTILINE)
+    html = _re.sub(r'^# (.+)$', r'<div style="font-size:16px; font-weight:bold; margin:10px 0;">\1</div>', html, flags=_re.MULTILINE)
+    # Line breaks
+    html = html.replace("\n", "<br>")
+    return (
+        f'<div style="font-family:Segoe UI,SF Pro Text,Helvetica Neue,Arial,sans-serif;'
+        f' font-size:13px; color:{fg}; line-height:1.5;">{html}</div>'
+    )
+
+
+# ── Chat bubble ──────────────────────────────────────────────────────────────
+class ChatBubble(QFrame):
     def __init__(self, text, is_user, theme, parent=None):
         super().__init__(parent)
-        self.setOpenExternalLinks(True)
-        self.setMarkdown(text)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        fg = theme['text_bright'] if not is_user else "white"
-        
-        self.setStyleSheet(f"""
-            QTextBrowser {{
-                background-color: transparent;
-                color: {fg};
-                border: none;
-                font-family: 'Segoe UI', Tahoma, sans-serif;
-                font-size: 13px;
-                padding: 0px;
-            }}
-        """)
-        
-        self.document().contentsChanged.connect(self._adjust_height)
+        self._theme = theme
+        self._is_user = is_user
+        lay = QVBoxLayout(self)
+        lay.setSpacing(0)
 
-    def _adjust_height(self):
-        doc_height = self.document().size().height()
-        self.setFixedHeight(int(doc_height) + 12)
-
-class ChatMessage(QFrame):
-    """A single chat message bubble with Cursor style."""
-    def __init__(self, text, is_user, theme, parent=None):
-        super().__init__(parent)
-        self.theme = theme
-        self.is_user = is_user
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
-        
-        # Header / Author
-        author_layout = QHBoxLayout()
-        author_icon = QLabel("👤" if is_user else "✨")
-        author_icon.setFixedSize(16, 16)
-        
-        author_label = QLabel("You" if is_user else "Lutervyn AI")
-        author_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        author_label.setStyleSheet(f"color: {theme['text_secondary']}; opacity: 0.8;")
-        
-        author_layout.addWidget(author_icon)
-        author_layout.addWidget(author_label)
-        author_layout.addStretch()
-        layout.addLayout(author_layout)
-        
-        # Content
-        self.content = MarkdownBubble(text, is_user, theme, self)
-        layout.addWidget(self.content)
-        
-        bg_color = theme['bg_hover']
-        border_color = theme['border']
-        
-        self.setStyleSheet(f"""
-            ChatMessage {{
-                background-color: {bg_color};
-                border: 1px solid {border_color};
-                border-radius: 8px;
-                margin: 4px 12px;
-            }}
-        """)
-        
         if is_user:
-            self.setStyleSheet(f"""
-                ChatMessage {{ 
-                    border: 1px solid {theme['accent']}; 
-                    background-color: rgba(0, 120, 215, 0.1); 
-                    border-radius: 8px;
-                    margin: 4px 12px;
-                }}
-            """)
+            lay.setContentsMargins(10, 6, 10, 6)
+        else:
+            lay.setContentsMargins(12, 2, 12, 2)
 
+        # Message body
+        self.body = QLabel()
+        self.body.setWordWrap(True)
+        self.body.setTextFormat(Qt.TextFormat.RichText)
+        self.body.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction
+        )
+        self.body.setStyleSheet(
+            "background: transparent; padding: 0; margin: 0; border: none;"
+        )
+        self.body.setText(_md_to_html(text, theme.get('text_bright', '#fff')))
+        lay.addWidget(self.body)
+
+        # Styling: grey filled box for user, transparent for AI
+        if is_user:
+            self.setStyleSheet(
+                f"background: {theme.get('bg_active', '#2c2c2e')};"
+                " border: none;"
+                " border-radius: 8px; margin: 2px 8px;"
+            )
+        else:
+            self.setStyleSheet(
+                "background: transparent; border: none; margin: 0px 8px;"
+            )
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+
+    def append_text(self, md):
+        """Live-append for streaming."""
+        self.body.setText(_md_to_html(md, self._theme.get('text_bright', '#fff')))
+
+
+# ── Send Button (Custom Painted) ──────────────────────────────────────────────
+class SendButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(28, 28)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Build theme-ready colors
+        # Try to get theme from parent (AiPanel)
+        theme = {}
+        if hasattr(self.parent(), 'theme'):
+            theme = self.parent().theme
+        elif hasattr(self.parent().parent(), 'theme'):
+            theme = self.parent().parent().theme
+
+        # Hover state
+        if self.underMouse() and self.isEnabled():
+            painter.setBrush(QBrush(QColor(theme.get('bg_hover', '#3a3a3c'))))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 6, 6)
+
+        # Arrow color
+        if not self.isEnabled():
+            color = QColor(theme.get('text_disabled', '#636366'))
+        elif self.underMouse():
+            color = QColor(theme.get('accent', '#58a6ff')) # Use accent on hover
+        else:
+            color = QColor(theme.get('text_bright', '#ffffff'))
+
+        painter.setPen(QPen(color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setBrush(QBrush(color))
+
+        # Draw a sleek right-pointing arrow (triangle-ish)
+        # Center of button is (14, 14)
+        poly = QPolygon([
+            QPoint(10, 8),   # Top left
+            QPoint(20, 14),  # Mid right (tip)
+            QPoint(10, 20),  # Bottom left
+        ])
+        painter.drawPolygon(poly)
+
+
+# ── Main Panel ────────────────────────────────────────────────────────────────
 class AiPanel(QWidget):
-    """The AI Sidebar panel (Lutervyn AI)."""
     def __init__(self, theme, parent=None):
         super().__init__(parent)
         self.theme = theme
-        self.coder = None
+        self.history = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self._streaming_text = ""
+        self._current_bubble = None
+        self._sig = _Signals()
+        self._sig.chunk.connect(self._on_chunk)
+        self._sig.done.connect(self._on_done)
+        self._sig.error.connect(self._on_error)
+        self._sig.status.connect(self._on_status)
+        self._sig.credits.connect(self._on_credits)
         self._init_ui()
-        QTimer.singleShot(500, self._init_coder)
+        QTimer.singleShot(500, self._greet)
 
+    # ── UI setup ──────────────────────────────────────────────────────────
     def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.setStyleSheet(f"background-color: {self.theme['sidebar_bg']};")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # --- HEADER ---
-        header = QFrame()
-        header.setFixedHeight(35)
-        header.setStyleSheet(f"border-bottom: 1px solid {self.theme['border']};")
-        h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(15, 0, 15, 0)
-        
-        title = QLabel("LUTERVYN AI")
-        title.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {self.theme['text_bright']}; letter-spacing: 1px;")
-        h_layout.addWidget(title)
-        h_layout.addStretch()
-        layout.addWidget(header)
+        t = self.theme  # shorthand
 
-        # --- CONTENT ---
+        # Header
+        hdr = QLabel("  Lutervyn AI")
+        hdr.setFixedHeight(32)
+        hdr.setStyleSheet(
+            f"background: {t.get('sidebar_bg', '#252526')};"
+            f" color: {t.get('text_bright', '#fff')};"
+            " font-weight: bold; font-size: 13px;"
+        )
+        root.addWidget(hdr)
+
+        # Scroll area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll.setStyleSheet("background: transparent; border: none;")
-        
-        self.chat_container = QWidget()
-        self.chat_layout = QVBoxLayout(self.chat_container)
-        self.chat_layout.setContentsMargins(0, 10, 0, 10)
-        self.chat_layout.setSpacing(8)
-        self.chat_layout.addStretch()
-        
-        self.scroll.setWidget(self.chat_container)
-        layout.addWidget(self.scroll, 1)
+        self.scroll.setStyleSheet(
+            f"background: {t.get('bg_darkest', '#1e1e1e')};"
+        )
+        self.chat_box = QWidget()
+        self.chat_lay = QVBoxLayout(self.chat_box)
+        self.chat_lay.setContentsMargins(0, 4, 0, 4)
+        self.chat_lay.setSpacing(2)
+        self.chat_lay.addStretch()
+        self.scroll.setWidget(self.chat_box)
+        root.addWidget(self.scroll, 1)
 
-        # --- INPUT AREA ---
-        input_wrapper = QFrame()
-        input_wrapper.setContentsMargins(12, 0, 12, 12)
-        input_wrapper_layout = QVBoxLayout(input_wrapper)
-        
-        self.input_card = QFrame()
-        self.input_card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.theme['input_bg']};
-                border: 1px solid {self.theme['input_border']};
-                border-radius: 8px;
-            }}
-        """)
-        card_layout = QVBoxLayout(self.input_card)
-        card_layout.setContentsMargins(10, 10, 10, 8)
-        card_layout.setSpacing(5)
-        
+        # ── Input area (Cursor-style) ────────────────────────────────────
+        input_frame = QFrame()
+        input_frame.setStyleSheet(
+            f"background: {t.get('bg_darkest', '#000')};"
+            f" border-top: 1px solid {t.get('border', '#3a3a3c')};"
+        )
+        input_root = QVBoxLayout(input_frame)
+        input_root.setContentsMargins(8, 6, 8, 4)
+        input_root.setSpacing(4)
+
+        # Input row: text box + send icon
+        input_row = QHBoxLayout()
+        input_row.setContentsMargins(0, 0, 0, 0)
+        input_row.setSpacing(0)
+
         self.input_edit = QTextEdit()
-        self.input_edit.setPlaceholderText("Ask Lutervyn AI to edit code...")
-        self.input_edit.setMaximumHeight(150)
-        self.input_edit.setFrameShape(QFrame.Shape.NoFrame)
-        self.input_edit.setFont(QFont("Segoe UI", 10))
-        self.input_edit.setStyleSheet("background: transparent; border: none; color: white; padding: 0;")
-        self.input_edit.installEventFilter(self)
-        card_layout.addWidget(self.input_edit)
-        
-        footer_layout = QHBoxLayout()
-        self.status_label = QLabel("Initializing...")
-        self.status_label.setFont(QFont("Segoe UI", 8))
-        self.status_label.setStyleSheet(f"color: {self.theme['text_disabled']};")
-        footer_layout.addWidget(self.status_label)
-        
-        footer_layout.addStretch()
-        
-        self.send_btn = QPushButton("Send")
-        self.send_btn.setFixedSize(50, 24)
+        self.input_edit.setPlaceholderText("Ask anything…")
+        self.input_edit.setMaximumHeight(72)
+        self.input_edit.setMinimumHeight(36)
+        self.input_edit.setStyleSheet(
+            f"background: {t.get('bg_medium', '#1c1c1e')};"
+            f" color: {t.get('text_bright', '#fff')};"
+            f" border: 1px solid {t.get('border', '#3a3a3c')};"
+            " border-radius: 8px; padding: 8px 10px;"
+            " font-family: 'Segoe UI', 'SF Pro Text', sans-serif;"
+            " font-size: 13px;"
+        )
+        input_row.addWidget(self.input_edit, 1)
+
+        # Send button — custom painted arrow
+        self.send_btn = SendButton()
         self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.send_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.theme['accent']};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{ background-color: {self.theme['bg_selection']}; }}
-            QPushButton:disabled {{ background-color: {self.theme['border']}; color: {self.theme['text_disabled']}; }}
-        """)
         self.send_btn.clicked.connect(self._on_send)
-        footer_layout.addWidget(self.send_btn)
-        
-        card_layout.addLayout(footer_layout)
-        input_wrapper_layout.addWidget(self.input_card)
-        layout.addWidget(input_wrapper)
+        input_row.addWidget(self.send_btn)
 
-    def _init_coder(self):
-        try:
-            self.status_label.setText("Starting...")
-            from aider.main import main as cli_main
-            
-            # This is the core aider engine
-            self.coder = cli_main(return_coder=True)
-            self.status_label.setText("Lutervyn AI Ready")
-            self.send_btn.setEnabled(True)
-            
-            self._add_message("Hello! I'm Lutervyn AI. Ask me to implement features, fix bugs, or explain code. I can edit files directly in your workspace.", False)
-            
-        except Exception as e:
-            self.status_label.setText("Error")
-            self._add_message(f"### Startup Error\n{e}", False)
+        input_root.addLayout(input_row)
 
-    def _add_message(self, text, is_user):
-        self.chat_layout.takeAt(self.chat_layout.count() - 1)
-        bubble = ChatMessage(text, is_user, self.theme, self)
-        self.chat_layout.addWidget(bubble)
-        self.chat_layout.addStretch()
-        QTimer.singleShot(100, lambda: self.scroll.verticalScrollBar().setValue(
-            self.scroll.verticalScrollBar().maximum()))
+        # Bottom bar: model selector + credits + status
+        bottom_bar = QHBoxLayout()
+        bottom_bar.setContentsMargins(2, 0, 2, 0)
+        bottom_bar.setSpacing(8)
+
+        # Model selector
+        self.model_combo = QComboBox()
+        for display_name, model_id in MODELS:
+            self.model_combo.addItem(display_name, model_id)
+        self.model_combo.setFixedHeight(22)
+        self.model_combo.setStyleSheet(
+            "background: transparent;"
+            f" color: {t.get('text_secondary', '#aeaeb2')};"
+            " border: none; padding: 0 4px;"
+            " font-family: 'Segoe UI', sans-serif; font-size: 11px;"
+        )
+        bottom_bar.addWidget(self.model_combo)
+
+        # Credits label (fetched from OpenRouter)
+        self.credits_label = QLabel("…")
+        self.credits_label.setStyleSheet(
+            f"color: {t.get('text_disabled', '#636366')};"
+            " font-size: 10px; font-family: 'Segoe UI', sans-serif;"
+            " background: transparent;"
+        )
+        bottom_bar.addWidget(self.credits_label)
+
+        bottom_bar.addStretch()
+
+        # Status
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet(
+            f"color: {t.get('text_disabled', '#636366')};"
+            " font-size: 10px; font-family: 'Segoe UI', sans-serif;"
+            " background: transparent;"
+        )
+        bottom_bar.addWidget(self.status_label)
+
+        input_root.addLayout(bottom_bar)
+        root.addWidget(input_frame)
+
+        # Fetch credits on startup
+        threading.Thread(target=self._fetch_credits, daemon=True).start()
+
+    # ── Greeting ──────────────────────────────────────────────────────────
+    def _greet(self):
+        self._add_bubble(
+            "Hi! I'm **Lutervyn AI**. Ask me anything about your code.", False
+        )
+
+    # ── Chat logic ────────────────────────────────────────────────────────
+    def _add_bubble(self, text, is_user):
+        self.chat_lay.takeAt(self.chat_lay.count() - 1)  # remove stretch
+        b = ChatBubble(text, is_user, self.theme, self.chat_box)
+        self.chat_lay.addWidget(b)
+        self.chat_lay.addStretch()
+        QTimer.singleShot(50, self._scroll_down)
+        return b
 
     def _on_send(self):
-        prompt = self.input_edit.toPlainText().strip()
-        if not prompt or not self.coder:
+        text = self.input_edit.toPlainText().strip()
+        if not text:
             return
-            
         self.input_edit.clear()
-        self._add_message(prompt, True)
-        
+        self._add_bubble(text, True)
+
+        self.history.append({"role": "user", "content": text})
+        self._streaming_text = ""
+        self._current_bubble = self._add_bubble("…", False)
+
         self.send_btn.setEnabled(False)
-        self.status_label.setText("Thinking...")
-        
-        self.current_ai_bubble = ChatMessage("", False, self.theme, self)
-        self.chat_layout.takeAt(self.chat_layout.count() - 1)
-        self.chat_layout.addWidget(self.current_ai_bubble)
-        self.chat_layout.addStretch()
-        
-        self.ai_response_text = ""
-        threading.Thread(target=self._run_aider, args=(prompt,), daemon=True).start()
+        self.status_label.setText("Thinking…")
 
-    def _run_aider(self, prompt):
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    def _worker(self):
+        """Runs on a background thread."""
         try:
-            for chunk in self.coder.run_stream(prompt):
-                self.ai_response_text += chunk
-                QTimer.singleShot(0, lambda: self.current_ai_bubble.content.setMarkdown(self.ai_response_text))
-            
-            QTimer.singleShot(0, self._on_complete)
+            model = self.model_combo.currentData() or DEFAULT_MODEL
+            def on_chunk(ch):
+                self._sig.chunk.emit(ch)
+
+            full, usage = chat_completion(list(self.history), model=model, on_chunk=on_chunk)
+            pt = usage.get("prompt_tokens", 0)
+            ct = usage.get("completion_tokens", 0)
+            self._sig.done.emit(full, pt, ct)
         except Exception as e:
-            QTimer.singleShot(0, lambda: self._add_message(f"**Error:** {e}", False))
-            QTimer.singleShot(0, self._on_complete)
+            self._sig.error.emit(str(e))
 
-    def _on_complete(self):
+    # ── Slots (main thread) ───────────────────────────────────────────────
+    def _on_chunk(self, text):
+        self._streaming_text += text
+        if self._current_bubble:
+            self._current_bubble.append_text(self._streaming_text)
+        self._scroll_down()
+
+    def _on_done(self, full, prompt_tokens, completion_tokens):
+        self.history.append({"role": "assistant", "content": full})
+        if self._current_bubble:
+            self._current_bubble.append_text(full)
         self.send_btn.setEnabled(True)
-        self.status_label.setText("Lutervyn AI Ready")
-        QTimer.singleShot(100, lambda: self.scroll.verticalScrollBar().setValue(
-            self.scroll.verticalScrollBar().maximum()))
+        self.status_label.setText("Ready")
+        total = prompt_tokens + completion_tokens
+        if total > 0:
+            self.status_label.setText(f"Ready ({total:,} tokens)")
+        self._scroll_down()
 
-    def eventFilter(self, obj, event):
-        if obj == self.input_edit and event.type() == event.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Return and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
-                self._on_send()
-                return True
-        return super().eventFilter(obj, event)
+    def _on_error(self, msg):
+        if self._current_bubble:
+            self._current_bubble.append_text(f"**Error:** {msg}")
+        self.send_btn.setEnabled(True)
+        self.status_label.setText("Error — try again")
+
+    def _on_status(self, msg):
+        self.status_label.setText(msg)
+
+    def _scroll_down(self):
+        QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
+            self.scroll.verticalScrollBar().maximum()
+        ))
+
+    def _fetch_credits(self):
+        """Background thread to fetch credits."""
+        try:
+            req = urllib.request.Request("https://openrouter.ai/api/v1/key", headers={
+                "Authorization": f"Bearer {API_KEY}",
+            })
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                # OpenRouter returns { "data": { "limit_remaining": 1.23, ... } }
+                d = data.get("data", {})
+                limit = d.get("limit_remaining")
+                if limit is None:
+                    txt = "Unlimited"
+                else:
+                    txt = f"${float(limit):.3f}"
+                self._sig.credits.emit(txt)
+        except Exception:
+            self._sig.credits.emit("Error")
+
+    def _on_credits(self, txt):
+        self.credits_label.setText(txt)
