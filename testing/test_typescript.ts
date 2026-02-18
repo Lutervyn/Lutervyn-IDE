@@ -162,6 +162,10 @@ class LinkedList<T> {
         return value;
     }
 
+    peek(): T | undefined {
+        return this.head?.value;
+    }
+
     *[Symbol.iterator](): Generator<T, void, unknown> {
         let current = this.head;
         while (current) {
@@ -185,12 +189,21 @@ interface ListNode<T> {
 abstract class BaseService<T extends { id: number }> implements Repository<T> {
     protected items: Map<number, T> = new Map();
     private nextId: number = 1;
+    private cache: Map<number, T> = new Map();
 
     abstract validate(data: Partial<T>): boolean;
     abstract getEntityName(): string;
 
     async findById(id: number): Promise<T | null> {
-        return this.items.get(id) ?? null;
+        if (this.cache.has(id)) {
+            return this.cache.get(id) ?? null;
+        }
+
+        const item = this.items.get(id) ?? null;
+        if (item) {
+            this.cache.set(id, item);
+        }
+        return item;
     }
 
     async findAll(filter?: Partial<T>): Promise<T[]> {
@@ -216,11 +229,14 @@ abstract class BaseService<T extends { id: number }> implements Repository<T> {
         if (!existing) throw new Error(`${this.getEntityName()} not found`);
         const updated = { ...existing, ...data };
         this.items.set(id, updated);
+		this.cache.set(id, updated); // Update cache as well
         return updated;
     }
 
     async delete(id: number): Promise<boolean> {
-        return this.items.delete(id);
+        const deleted = this.items.delete(id);
+		this.cache.delete(id); // Remove from cache as well
+        return deleted;
     }
 }
 
@@ -343,6 +359,8 @@ async function main(): Promise<void> {
     const result = Result.ok(42).map(x => x * 2).unwrap();
     const list = new LinkedList<number>();
     [1, 2, 3].forEach(n => list.push(n));
+    const head = list.peek();
+    console.log("Linked List Head:", head)
     const area = getArea({ kind: 'circle', radius: 5 });
     const validator = new Validators.EmailValidator();
     console.log('Valid:', validator.isValid('test@example.com'));
@@ -350,3 +368,4 @@ async function main(): Promise<void> {
 }
 
 main().catch(console.error);
+```

@@ -1,6 +1,5 @@
 """
-Lutervyn IDE - A Python IDE built with Python
-Inspired by VS Code & PyScripter
+Lutervyn IDE
 
 Run this file to start the IDE:
     python run_ide.py
