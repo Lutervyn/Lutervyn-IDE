@@ -321,14 +321,15 @@ class MainWindow(QMainWindow):
         self.title_bar.btn_sidebar_right.set_active(self._ai_panel_visible)
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.setHandleWidth(1)
+        self.main_splitter.setHandleWidth(1) # Extra thin handle
+        self.main_splitter.setOpaqueResize(True) # Live movement as requested
         self.main_splitter.addWidget(self.sidebar)
         self.main_splitter.addWidget(right_area)
         self.main_splitter.addWidget(self.ai_panel)
-        self.main_splitter.setSizes([280, 800, 300]) # Give AI panel some initial width
-        self.main_splitter.setCollapsible(0, False) # Prevent sidebar from snapping/hiding on drag
-        self.main_splitter.setCollapsible(1, False) # Prevent editor from snapping
-        self.main_splitter.setCollapsible(2, True)  # Allow AI panel to collapse
+        self.main_splitter.setSizes([280, 800, 300]) 
+        self.main_splitter.setCollapsible(0, False) 
+        self.main_splitter.setCollapsible(1, False) 
+        self.main_splitter.setCollapsible(2, False) # Disable snapping for smooth resizing
         
         # Ensure sidebar can be resized but has a sane minimum
         self.sidebar.setMinimumWidth(150)

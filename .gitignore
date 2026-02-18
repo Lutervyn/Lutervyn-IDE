@@ -1,26 +1,7 @@
-# Python
+api_key.txt
 __pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
+*.pyc
+.idea/
+.vscode/
 dist/
 build/
-*.egg
-
-# IDE / Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-Thumbs.db
-Desktop.ini
-.DS_Store
-
-# Helper/patch scripts (dev only)
-patch_help.py
-patch_main.py
-write_main.py
-Ai integration
