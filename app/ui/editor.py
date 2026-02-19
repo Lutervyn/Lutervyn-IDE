@@ -49,6 +49,53 @@ LEXER_MAP = {
 }
 
 
+class DiffReviewOverlay(QFrame):
+    """Floating toolbar for accepting or rejecting code changes."""
+    accepted = pyqtSignal()
+    rejected = pyqtSignal()
+
+    def __init__(self, theme, parent=None):
+        super().__init__(parent)
+        self.theme = theme
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: #252526; border: 1px solid #444; border-radius: 6px;
+                padding: 4px;
+            }}
+        """)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(6, 2, 6, 2)
+        lay.setSpacing(8)
+
+        lbl = QLabel("AI Proposal")
+        lbl.setStyleSheet("color: #ccc; font-size: 11px; font-weight: bold; margin-right: 4px;")
+        lay.addWidget(lbl)
+
+        self.accept_btn = QPushButton("Accept")
+        self.accept_btn.setStyleSheet("""
+            QPushButton { background: #0e639c; color: white; border-radius: 4px; padding: 2px 10px; font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background: #1177bb; }
+        """)
+        self.accept_btn.clicked.connect(self.accepted.emit)
+        lay.addWidget(self.accept_btn)
+
+        self.reject_btn = QPushButton("Reject")
+        self.reject_btn.setStyleSheet("""
+            QPushButton { background: #3e3e3e; color: #ccc; border-radius: 4px; padding: 2px 10px; font-size: 11px; }
+            QPushButton:hover { background: #4e4e4e; color: white; }
+        """)
+        self.reject_btn.clicked.connect(self.rejected.emit)
+        lay.addWidget(self.reject_btn)
+
+        # Shadow for depth
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        self.setGraphicsEffect(shadow)
+
 class CodeEditorWidget(QsciScintilla):
     """A single code editor pane powered by QScintilla."""
 
@@ -61,6 +108,21 @@ class CodeEditorWidget(QsciScintilla):
         self._setup_editor()
         self._setup_theme(theme)
         self._setup_lexer(file_path)
+        
+        # Diff state
+        self._original_text = ""
+        self._proposed_text = ""
+        self._diff_overlay = None
+        
+        # Setup indicators
+        self.INDIC_ADDED = 8
+        self.INDIC_REMOVED = 9
+        self.indicatorDefine(QsciScintilla.IndicatorStyle.StraightBoxIndicator, self.INDIC_ADDED)
+        self.setIndicatorForegroundColor(QColor(0, 255, 0, 40), self.INDIC_ADDED) # Transparent green
+        self.setIndicatorOutlineColor(QColor(0, 255, 0, 80), self.INDIC_ADDED)
+        
+        self.indicatorDefine(QsciScintilla.IndicatorStyle.StrikeIndicator, self.INDIC_REMOVED)
+        self.setIndicatorForegroundColor(QColor(255, 0, 0, 150), self.INDIC_REMOVED) # Red strike
 
         # Load file content
         if file_path and os.path.exists(file_path):
@@ -462,6 +524,98 @@ class CodeEditorWidget(QsciScintilla):
 
     def _on_modification_changed(self, modified):
         self._is_modified = modified
+
+    def show_proposed_diff(self, original, proposed):
+        """Show inline green/red diffs and the floating toolbar."""
+        self._original_text = original
+        self._proposed_text = proposed
+        
+        import difflib
+        import re
+        
+        # Clear previous markers
+        self.clear_diff()
+        
+        # We'll use a mixed approach: 
+        # For a clean experience, we'll temporarily set the editor text to the MERGED view
+        # then apply indicators to highlight what's added and what's removed.
+        
+        merged_lines = []
+        additions = [] # (start_pos, length)
+        removals = []  # (start_pos, length)
+        
+        diff = list(difflib.ndiff(original.splitlines(keepends=True), proposed.splitlines(keepends=True)))
+        
+        current_text = ""
+        for line in diff:
+            if line.startswith('  '): # Unchanged
+                current_text += line[2:]
+            elif line.startswith('+ '): # Added
+                start = len(current_text)
+                content = line[2:]
+                current_text += content
+                additions.append((start, len(content)))
+            elif line.startswith('- '): # Removed
+                start = len(current_text)
+                content = line[2:]
+                current_text += content
+                removals.append((start, len(content)))
+        
+        self.setText(current_text)
+        
+        # Apply indicators (convert byte offset to line, index)
+        for start, length in additions:
+            line_from, idx_from = self.lineIndexFromPosition(start)
+            line_to, idx_to = self.lineIndexFromPosition(start + length)
+            self.fillIndicatorRange(line_from, idx_from, line_to, idx_to, self.INDIC_ADDED)
+        for start, length in removals:
+            line_from, idx_from = self.lineIndexFromPosition(start)
+            line_to, idx_to = self.lineIndexFromPosition(start + length)
+            self.fillIndicatorRange(line_from, idx_from, line_to, idx_to, self.INDIC_REMOVED)
+            
+        # Show overlay
+        if not self._diff_overlay:
+            self._diff_overlay = DiffReviewOverlay(self.theme, self)
+            self._diff_overlay.accepted.connect(self.accept_proposed_diff)
+            self._diff_overlay.rejected.connect(self.discard_proposed_diff)
+            
+        self._diff_overlay.show()
+        self._reposition_overlay()
+        
+    def _reposition_overlay(self):
+        if self._diff_overlay:
+            # Float in top right
+            margin = 20
+            self._diff_overlay.adjustSize()
+            x = self.width() - self._diff_overlay.width() - margin
+            y = margin
+            self._diff_overlay.move(x, y)
+            
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reposition_overlay()
+
+    def clear_diff(self):
+        """Clear all diff indicators and hide overlay."""
+        total_lines = self.lines()
+        if total_lines > 0:
+            last_line = total_lines - 1
+            last_index = self.lineLength(last_line)
+            self.clearIndicatorRange(0, 0, last_line, last_index, self.INDIC_ADDED)
+            self.clearIndicatorRange(0, 0, last_line, last_index, self.INDIC_REMOVED)
+        if self._diff_overlay:
+            self._diff_overlay.hide()
+
+    def accept_proposed_diff(self):
+        """Finalize the proposed changes."""
+        self.setText(self._proposed_text)
+        self.clear_diff()
+        self.save_file()
+
+    def discard_proposed_diff(self):
+        """Revert to original text."""
+        self.setText(self._original_text)
+        self.clear_diff()
 
     def save_file(self):
         """Save the current file. Returns True if saved, False if cancelled or error."""

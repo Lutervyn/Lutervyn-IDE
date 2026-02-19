@@ -86,6 +86,9 @@ class MainWindow(QMainWindow):
         self._auto_save_timer.setInterval(1000) # 1 second delay
         self._auto_save_timer.timeout.connect(self.cmd_save_all_auto)
         
+        # Connect AI Panel signals
+        self.ai_panel._sig.open_inline_diff.connect(self._on_open_inline_diff)
+        
         # Restore last workspace if nothing was passed via CLI
         QTimer.singleShot(0, self._restore_state)
 
@@ -326,6 +329,12 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.sidebar)
         self.main_splitter.addWidget(right_area)
         self.main_splitter.addWidget(self.ai_panel)
+        
+        # Hyper-Agent Connectivity
+        self.panel.terminal_output.connect(self.ai_panel._on_terminal_output)
+        self.ai_panel._sig_run_terminal.connect(self._on_run_terminal_requested)
+        self.ai_panel._sig_draft_insert.connect(self._on_draft_insert_requested)
+
         self.main_splitter.setSizes([280, 800, 300]) 
         self.main_splitter.setCollapsible(0, False) 
         self.main_splitter.setCollapsible(1, False) 
@@ -405,6 +414,38 @@ class MainWindow(QMainWindow):
     def _on_file_close_requested(self, path):
         """Handle request from sidebar to close a file (e.g. before deletion)."""
         self.editor_tabs.close_file(path)
+
+    def _on_run_terminal_requested(self, command):
+        """Execute a command suggested by the AI."""
+        if hasattr(self.panel, "terminal") and self.panel.terminal:
+            self.panel.show_terminal()
+            self.panel.terminal.run_command(command)
+
+    def _on_draft_insert_requested(self, path, line, code):
+        """AI proposed a code insertion at a specific line."""
+        print(f"[MainWindow] AI Draft requested for {path} at line {line}")
+        # In the future, this will trigger a 'Proposed Change' UI in the editor.
+        # For now, we just log it or provide a status message.
+        self.statusBar().showMessage(f"AI proposed a draft for {os.path.basename(path)}", 3000)
+
+    def _on_open_inline_diff(self, path, original, updated):
+        """Handler for AI proposed changes, enables inline diff mode in the editor."""
+        path = os.path.normpath(path)
+        self._open_file(path)
+        
+        index = self.editor_tabs._open_files.get(path)
+        if index is not None:
+            wrapper = self.editor_tabs.tabs.widget(index)
+            editor = None
+            if hasattr(wrapper, 'editor') and wrapper.editor:
+                editor = wrapper.editor
+            elif hasattr(wrapper, 'editor_widget') and wrapper.editor_widget:
+                editor = wrapper.editor_widget
+            elif hasattr(wrapper, 'setCursorPosition'):
+                editor = wrapper
+            
+            if editor and hasattr(editor, 'show_proposed_diff'):
+                editor.show_proposed_diff(original, updated)
 
     def _open_file(self, path_or_name):
         """Open a file in the editor or switch to existing tab."""

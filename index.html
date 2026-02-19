@@ -1,0 +1,118 @@
+content: <!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login and Registration</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css">
+</head>
+
+<body>
+  <div class="container">
+    <!-- Login Form -->
+    <div class="form-box login">
+      <form id="loginForm" action="#" onsubmit="return validateLoginForm()">
+        <h1>Login</h1>
+        <div class="input-box">
+          <input type="text" id="loginUsername" placeholder="Username" required>
+          <input type="text" id="loginUsername" placeholder="Username" required aria-label="Username">
+          <i class="bx bxs-user"></i>
+        </div>
+
+        <div class="input-box">
+          <input type="password" id="loginPassword" placeholder="Password" required>
+          <input type="password" id="loginPassword" placeholder="Password" required aria-label="Password">
+          <i class="bx bxs-lock-alt"></i>
+          <button type="button" class="toggle-password" onclick="toggleLoginPasswordVisibility()" aria-label="Toggle password visibility">
+            <i class="bx bx-show"></i>
+          </button>
+        </div>
+        <div class="remember-me">
+          <label for="loginRememberMe">
+            <input type="checkbox" id="loginRememberMe">Remember me
+          </label>
+        </div>
+        <div class="forgot-link">
+          <a href="#">Forgot password</a>
+        </div>
+        <button type="submit" class="btn">Login</button>
+        <p>or login with social platform</p>
+        <div class="social-icons">
+          <a href="#" aria-label="Login with Google"><i class="bx bxl-google"></i></a>
+          <a href="#" aria-label="Login with Facebook"><i class="bx bxl-facebook"></i></a>
+
+        </div>
+        <div id="loginError" class="error-message"></div>
+
+      </form>
+    </div>
+    <!-- End Login Form -->
+
+    <!-- Registration Form -->
+    <div class="form-box register">
+      <form id="registerForm" action="#" onsubmit="return validateRegisterForm()">
+        <h1>Registration</h1>
+        <div class="input-box">
+          <input type="text" id="registerUsername" placeholder="Username" required>
+          <input type="text" id="registerUsername" placeholder="Username" required aria-label="Username">
+          <i class="bx bxs-user"></i>
+        </div>
+        <div class="input-box">
+          <input type="email" id="registerEmail" placeholder="Email" required>
+          <input type="email" id="registerEmail" placeholder="Email" required aria-label="Email">
+          <i class="bx bxs-envelope"></i>
+        </div>
+        <div class="input-box">
+          <input type="password" id="registerPassword" placeholder="Password" required>
+          <input type="password" id="registerPassword" placeholder="Password" required aria-label="Password">
+          <i class="bx bxs-lock-alt"></i>
+          <button type="button" class="toggle-password" onclick="toggleRegisterPasswordVisibility()" aria-label="Toggle password visibility">
+            <i class="bx bx-show"></i>
+          </button>
+        </div>
+        <div id="registerError" class="error-message"></div>
+
+        <button type="submit" class="btn">Register</button>
+        <p>or register with social platforms</p>
+        <div class="social-icons">
+          <a href="#" aria-label="Register with Google"><i class="bx bxl-google"></i></a>
+          <a href="#" aria-label="Register with Facebook"><i class="bx bxl-facebook"></i></a>
+          <a href="#" aria-label="Register with GitHub"><i class="bx bxl-github"></i></a>
+          <a href="#" aria-label="Register with LinkedIn"><i class="bx bxl-linkedin"></i></a>
+        </div>
+      </form>
+    </div>
+    <!-- End Registration Form -->
+
+    <!-- Toggle Box -->
+    <div class="toggle-box">
+      <div class="toggle-panel toggle-left">
+        <h1>Hello, Welcome!</h1>
+        <p>Don't have an account?</p>
+        <button class="btn register-btn" id="registerButton">Register</button>
+      </div>
+      <div class="toggle-panel toggle-right">
+        <h1>Welcome Back!</h1>
+        <p>Already have an account?</p>
+        <button class="btn login-btn" id="loginButton">Login</button>
+      </div>
+    </div>
+    <!-- End Toggle Box -->
+  </div>
+
+  <!-- File Viewer/Editor -->
+  <button id="openFileButton" class="btn">Open File</button>
+  <div id="fileEditor" style="display:none;">
+    <h2>File Editor</h2>
+    <textarea id="fileContent" rows="10" cols="80"></textarea><br>
+    <button id="saveFileButton" class="btn">Save File</button>
+  </div>
+
+  <script src="index.js"></script>
+  <!-- No backend logic is implemented, forms submit to the same page. -->
+</body>
+
+</html>

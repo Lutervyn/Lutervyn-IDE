@@ -126,7 +126,7 @@ class Result<T, E extends Error = Error> {
     isErr(): this is Result<never, E> { return !this._isOk; }
 
     unwrap(): T {
-        if (!this._isOk) throw new Error(this.error?.message ?? 'Result is not Ok');
+        if (!this._isOk) throw this.error;
         return this.value as T;
     }
 
@@ -229,13 +229,13 @@ abstract class BaseService<T extends { id: number }> implements Repository<T> {
         if (!existing) throw new Error(`${this.getEntityName()} not found`);
         const updated = { ...existing, ...data };
         this.items.set(id, updated);
-		this.cache.set(id, updated);
+		this.cache.set(id, updated); // Update cache as well
         return updated;
     }
 
     async delete(id: number): Promise<boolean> {
         const deleted = this.items.delete(id);
-		this.cache.delete(id);
+		this.cache.delete(id); // Remove from cache as well
         return deleted;
     }
 }
@@ -337,32 +337,18 @@ async function* asyncPaginate<T>(
 class AsyncQueue<T> {
     private queue: T[] = [];
     private resolvers: ((value: T) => void)[] = [];
-	private closed: boolean = false;
 
     enqueue(item: T): void {
-		if (this.closed) {
-			throw new Error("Queue is closed");
-		}
         const resolver = this.resolvers.shift();
         if (resolver) resolver(item);
         else this.queue.push(item);
     }
 
     async dequeue(): Promise<T> {
-        if (this.queue.length > 0) {
-            return this.queue.shift()!;
-        }
-		if (this.closed) {
-			return Promise.reject(new Error("Queue is closed"));
-		}
+        const item = this.queue.shift();
+        if (item !== undefined) return item;
         return new Promise<T>(resolve => this.resolvers.push(resolve));
     }
-
-	close(): void {
-		this.closed = true;
-		this.resolvers.forEach(reject => reject(new Error("Queue is closed")));
-		this.resolvers = [];
-	}
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -382,3 +368,4 @@ async function main(): Promise<void> {
 }
 
 main().catch(console.error);
+```

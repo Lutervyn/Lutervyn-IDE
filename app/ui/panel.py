@@ -78,6 +78,7 @@ class TerminalWidget(QPlainTextEdit):
     """Embedded terminal / interactive Python console."""
 
     command_executed = pyqtSignal(str, str)  # command, output
+    output_emitted = pyqtSignal(str) # Live chunk emitted
 
     def __init__(self, theme: dict, parent=None, cwd=None):
         super().__init__(parent)
@@ -144,6 +145,7 @@ class TerminalWidget(QPlainTextEdit):
                 self.insertPlainText(text)
                 self.moveCursor(QTextCursor.MoveOperation.End)
                 self._prompt_position = self.textCursor().position()
+                self.output_emitted.emit(text)
 
     def keyPressEvent(self, event: QKeyEvent):
         cursor = self.textCursor()
@@ -889,6 +891,8 @@ class TerminalContainer(QWidget):
         super().__init__(parent)
         self.theme = theme
         self.terminals: list[TerminalWidget] = []
+        self.terminal_output = pyqtSignal(str)
+        self.terminal_output = pyqtSignal(str)
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -997,6 +1001,7 @@ class TerminalContainer(QWidget):
 
     def add_terminal(self, cwd=None):
         term = TerminalWidget(self.theme, self, cwd=cwd)
+        term.output_emitted.connect(self.terminal_output.emit)
         self.terminals.append(term)
         self.stack.addWidget(term)
         
@@ -1048,6 +1053,7 @@ class BottomPanel(QWidget):
     problem_clicked = pyqtSignal(str, int)
     # Emitted when lint results change so status bar can update
     problems_changed = pyqtSignal(int, int)  # (errors, warnings)
+    terminal_output = pyqtSignal(str) # Bubbled from TerminalContainer
 
     @property
     def terminal(self):
@@ -1083,6 +1089,7 @@ class BottomPanel(QWidget):
 
         # Terminals Container
         self.terminal_container = TerminalContainer(theme, self)
+        self.terminal_container.terminal_output.connect(self.terminal_output.emit)
         self.tabs.addTab(self.terminal_container, "TERMINAL")
 
         # Output
