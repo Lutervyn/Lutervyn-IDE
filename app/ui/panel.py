@@ -887,12 +887,12 @@ class TerminalContainer(QWidget):
     Manages multiple terminals in a split view:
     [ Terminal Content (Stack) | Terminal List (Sidebar) ]
     """
+    terminal_output = pyqtSignal(str)
+
     def __init__(self, theme: dict, parent=None):
         super().__init__(parent)
         self.theme = theme
         self.terminals: list[TerminalWidget] = []
-        self.terminal_output = pyqtSignal(str)
-        self.terminal_output = pyqtSignal(str)
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1054,6 +1054,7 @@ class BottomPanel(QWidget):
     # Emitted when lint results change so status bar can update
     problems_changed = pyqtSignal(int, int)  # (errors, warnings)
     terminal_output = pyqtSignal(str) # Bubbled from TerminalContainer
+    problems_found = pyqtSignal(str, list) # (file_path, problems_list)
 
     @property
     def terminal(self):
@@ -1177,6 +1178,8 @@ class BottomPanel(QWidget):
         existing.extend(problems)
         self.problems.set_problems(existing)
         self._update_tab_badge()
+        # Notify for editor squiggles
+        self.problems_found.emit(path, problems)
         # Emit signal so main window can update status bar
         self._notify_status_bar()
 

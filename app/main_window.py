@@ -89,6 +89,9 @@ class MainWindow(QMainWindow):
         # Connect AI Panel signals
         self.ai_panel._sig.open_inline_diff.connect(self._on_open_inline_diff)
         
+        # Connect Panel signals
+        self.panel.problems_found.connect(self._on_problems_found)
+        
         # Restore last workspace if nothing was passed via CLI
         QTimer.singleShot(0, self._restore_state)
 
@@ -1134,7 +1137,21 @@ class MainWindow(QMainWindow):
         handler = cmd_map.get(cmd_id)
         if handler:
             handler()
+    def _on_problems_found(self, path, problems):
+        """Update editor with syntax error squiggles."""
+        editor = self.editor_tabs.get_editor_by_path(path)
+        if editor:
+            editor.clear_squiggles()
+            for p in problems:
+                if p.get('level') == 'error':
+                    editor.highlight_line(p.get('line', 0))
 
+    def closeEvent(self, event):
+        """Handle window close event."""
+        # Cleanup
+        if hasattr(self, "runner"):
+            self.runner.stop()
+        event.accept()
 
 def main():
     app = QApplication(sys.argv)

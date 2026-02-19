@@ -117,12 +117,17 @@ class CodeEditorWidget(QsciScintilla):
         # Setup indicators
         self.INDIC_ADDED = 8
         self.INDIC_REMOVED = 9
+        self.INDIC_SQUIGGLE = 10
+        
         self.indicatorDefine(QsciScintilla.IndicatorStyle.StraightBoxIndicator, self.INDIC_ADDED)
         self.setIndicatorForegroundColor(QColor(0, 255, 0, 40), self.INDIC_ADDED) # Transparent green
         self.setIndicatorOutlineColor(QColor(0, 255, 0, 80), self.INDIC_ADDED)
         
         self.indicatorDefine(QsciScintilla.IndicatorStyle.StrikeIndicator, self.INDIC_REMOVED)
         self.setIndicatorForegroundColor(QColor(255, 0, 0, 150), self.INDIC_REMOVED) # Red strike
+
+        self.indicatorDefine(QsciScintilla.IndicatorStyle.SquiggleIndicator, self.INDIC_SQUIGGLE)
+        self.setIndicatorForegroundColor(QColor("#f14c4c"), self.INDIC_SQUIGGLE) # VS Code Error Red
 
         # Load file content
         if file_path and os.path.exists(file_path):
@@ -156,6 +161,9 @@ class CodeEditorWidget(QsciScintilla):
         font.setFamilies(["Cascadia Code", "Consolas", "Fira Code", "Droid Sans Mono", "Monospace"])
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.setFont(font)
+        # Increase line height for premium look
+        self.setExtraAscent(4)
+        self.setExtraDescent(4)
 
         # Line numbers — margin 0
         self.setMarginType(0, QsciScintilla.MarginType.NumberMargin)
@@ -501,6 +509,56 @@ class CodeEditorWidget(QsciScintilla):
             for i in range(25):
                 lexer.setPaper(QColor(t['editor_bg']), i)
 
+        # ── HTML syntax colors — VS Code Dark+ style ──
+        elif isinstance(lexer, QsciLexerHTML):
+            t = self.theme
+            # VS Code HTML Colors
+            color_tag = QColor("#569CD6")      # Blue
+            color_attr = QColor("#9CDCFE")     # Light Blue
+            color_val = QColor("#CE9178")      # Orange
+            color_comment = QColor("#6A9955")   # Green
+            color_default = QColor("#D4D4D4")   # White-ish
+            color_muted = QColor("#808080")     # Gray
+            
+            lexer.setColor(color_tag, QsciLexerHTML.Tag)
+            lexer.setColor(color_tag, QsciLexerHTML.UnknownTag)
+            lexer.setColor(color_attr, QsciLexerHTML.Attribute)
+            lexer.setColor(color_attr, QsciLexerHTML.UnknownAttribute)
+            lexer.setColor(color_val, QsciLexerHTML.HTMLDoubleQuotedString)
+            lexer.setColor(color_val, QsciLexerHTML.HTMLSingleQuotedString)
+            lexer.setColor(color_comment, QsciLexerHTML.HTMLComment)
+            lexer.setColor(color_default, QsciLexerHTML.Default)
+            lexer.setColor(color_muted, QsciLexerHTML.Entity)
+            
+            # Crucial: standard paper bg for ALL styles (prevents white box artifacts)
+            for i in range(128):
+                lexer.setPaper(QColor(t['editor_bg']), i)
+                lexer.setFont(font, i)
+
+        # ── CSS syntax colors — VS Code Dark+ style ──
+        elif isinstance(lexer, QsciLexerCSS):
+            t = self.theme
+            # VS Code CSS Colors
+            # Scope: entity.name.tag / entity.other.attribute-name.class / .id
+            color_selector = QColor("#D7BA7D")  # Tan
+            # Scope: support.type.property-name
+            color_property = QColor("#9CDCFE")  # Light Blue
+            # Scope: constant.numeric / constant.other.color
+            color_value = QColor("#CE9178")     # Orange
+            color_comment = QColor("#6A9955")    # Green
+            
+            lexer.setColor(color_selector, QsciLexerCSS.Tag)
+            lexer.setColor(color_selector, QsciLexerCSS.ClassSelector)
+            lexer.setColor(color_selector, QsciLexerCSS.IDSelector)
+            lexer.setColor(color_selector, QsciLexerCSS.PseudoClass)
+            lexer.setColor(color_property, QsciLexerCSS.CSSProperty)
+            lexer.setColor(color_value, QsciLexerCSS.Value)
+            lexer.setColor(color_comment, QsciLexerCSS.Comment)
+            
+            for i in range(128):
+                lexer.setPaper(QColor(t['editor_bg']), i)
+                lexer.setFont(font, i)
+
         self.setLexer(lexer)
 
         # ── Override keyword sets AFTER setLexer ──
@@ -616,6 +674,25 @@ class CodeEditorWidget(QsciScintilla):
         """Revert to original text."""
         self.setText(self._original_text)
         self.clear_diff()
+
+    def highlight_line(self, line, indicator=None):
+        """Apply a 'beautiful' squiggle indicator to a specific line."""
+        if indicator is None:
+            indicator = self.INDIC_SQUIGGLE
+        
+        # Line is 1-indexed from linter, Scintilla is 0-indexed
+        idx = line - 1
+        if idx < 0 or idx >= self.lines():
+            return
+            
+        line_len = self.lineLength(idx)
+        self.fillIndicatorRange(idx, 0, idx, line_len, indicator)
+
+    def clear_squiggles(self):
+        """Clear all syntax error squiggles."""
+        total_lines = self.lines()
+        if total_lines > 0:
+            self.clearIndicatorRange(0, 0, total_lines-1, self.lineLength(total_lines-1), self.INDIC_SQUIGGLE)
 
     def save_file(self):
         """Save the current file. Returns True if saved, False if cancelled or error."""

@@ -22,8 +22,7 @@ from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QObject, QPoint, QPointF, QEven
 from PyQt6.QtGui import QFont, QColor, QPainter, QPolygon, QPolygonF, QPen, QBrush, QPixmap, QIcon, QClipboard
 from PyQt6.QtWidgets import QApplication
 
-
-# ── OpenRouter Client (stdlib only) ──────────────────────────────────────────
+# ──────────────────────────────────────────
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL  = "google/gemini-2.0-flash-001"
 
@@ -498,8 +497,9 @@ class CodeBlockWidget(QFrame):
         self._code = code
         self.setStyleSheet(f"""
             QFrame {{
-                background-color: #252526;
-                border-radius: 6px;
+                background-color: #1f1f1f;
+                border: 1px solid #2b2b2b;
+                border-radius: 4px;
                 margin: 6px 0;
             }}
         """)
@@ -509,12 +509,12 @@ class CodeBlockWidget(QFrame):
 
         # Header with Language and Copy Button
         header = QFrame()
-        header.setFixedHeight(34)
+        header.setFixedHeight(30) # Compact header
         header.setStyleSheet("""
-            background-color: rgba(45, 45, 48, 0.8); 
-            border-top-left-radius: 8px; 
-            border-top-right-radius: 8px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            background-color: #1f1f1f; 
+            border-top-left-radius: 4px; 
+            border-top-right-radius: 4px;
+            border-bottom: 1px solid #2b2b2b;
         """)
         hlay = QHBoxLayout(header)
         hlay.setContentsMargins(10, 0, 10, 0)
@@ -540,22 +540,19 @@ class CodeBlockWidget(QFrame):
         lay.addWidget(header)
 
         # Code Content
-        self.content = QLabel(code)
+        self.content = QLabel()
         self.content.setWordWrap(True)
         self.content.setMinimumWidth(0)
-        self.content.setTextFormat(Qt.TextFormat.PlainText) # Keep as text
+        self.content.setTextFormat(Qt.TextFormat.RichText)
         self.content.setStyleSheet("""
             QLabel {
-                color: #d4d4d4; 
-                font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace; 
-                font-size: 12px; 
-                padding: 16px; 
-                line-height: 1.5;
-                background-color: rgba(30, 30, 32, 0.4);
-                border-bottom-left-radius: 8px;
-                border-bottom-right-radius: 8px;
+                background-color: transparent;
+                padding: 16px;
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
             }
         """)
+        self.set_code(code, lang)
         lay.addWidget(self.content)
 
     def _copy_code(self):
@@ -568,7 +565,8 @@ class CodeBlockWidget(QFrame):
 
     def set_code(self, code, lang=""):
         self._code = code
-        self.content.setText(code)
+        html_content = SyntaxHighlighter.get_html(code, lang)
+        self.content.setText(html_content)
         # Update header lang if needed
         lang_lbl = self.findChild(QLabel) # The first one is lang_lbl
         if lang_lbl:

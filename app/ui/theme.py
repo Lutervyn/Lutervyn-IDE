@@ -4,115 +4,115 @@ VS Code/iOS-inspired dark/light theme system
 """
 
 DARK_THEME = {
-    "name": "Lutervyn iOS Dark",
+    "name": "Lutervyn Modern Dark",
 
-    # Base colors (iOS Dark / VS Code Modern)
-    "bg_darkest": "#000000",  # Pure Black Sidebar/Panel
-    "bg_dark": "#000000",     # Surface (Activity Bar)
-    "bg_medium": "#1c1c1e",   # Inputs/Hover
-    "bg_light": "#333333",    # Borders
-    "bg_hover": "#1c1c1e",
-    "bg_active": "#2c2c2e",
-    "bg_selection": "#2c2c2e",
+    # Base colors (Modern VS Code 2024)
+    "bg_darkest": "#1f1f1f",  # Editor Background
+    "bg_dark": "#181818",     # UI Foundation (Sidebar/Panel/Status)
+    "bg_medium": "#2d2d2d",   # Inputs/Hover
+    "bg_light": "#2b2b2b",    # Borders
+    "bg_hover": "#2a2d2e",
+    "bg_active": "#37373d",
+    "bg_selection": "#264f78",
 
     # Text
-    "text_primary": "#ffffff",
-    "text_secondary": "#aeaeb2",
-    "text_disabled": "#636366",
+    "text_primary": "#cccccc",
+    "text_secondary": "#999999",
+    "text_disabled": "#777777",
     "text_bright": "#ffffff",
 
     # Borders
-    "border": "#3a3a3c",        # Subtle separators
-    "border_light": "#48484a",
+    "border": "#2b2b2b",        # Subtle separators
+    "border_light": "#2b2b2b",
 
     # Accent
-    "accent": "#ffffff",        # Monochrome White
-    "accent_hover": "#f2f2f7",
-    "accent_fg": "#000000",
+    "accent": "#007acc",        # VS Code Blue
+    "accent_hover": "#1177bb",
+    "accent_fg": "#ffffff",
 
-    # Activity bar
-    "activitybar_bg": "#000000",
-    "activitybar_fg": "#8e8e93",
+    # Activity bar (Matches Sidebar for cohesive modern look)
+    "activitybar_bg": "#181818",
+    "activitybar_fg": "#858585",
     "activitybar_active_fg": "#ffffff",
-    "activitybar_active_border": "transparent",
-    "activitybar_badge_bg": "#ff3b30", # iOS Red for badges
+    "activitybar_active_border": "#ffffff",
+    "activitybar_badge_bg": "#007acc",
     "activitybar_badge_fg": "#ffffff",
 
     # Sidebar
-    "sidebar_bg": "#000000",
-    "sidebar_fg": "#d1d1d6",
-    "sidebar_header_bg": "#000000",
-    "sidebar_header_fg": "#aeaeb2",
+    "sidebar_bg": "#181818",
+    "sidebar_fg": "#cccccc",
+    "sidebar_header_bg": "#181818",
+    "sidebar_header_fg": "#bbbbbb",
 
     # Editor
-    "editor_bg": "#000000",      # Pure black
-    "editor_fg": "#d1d1d6",
-    "editor_line_highlight": "#1c1c1e",
-    "editor_selection": "#2c2c2e",
-    "editor_gutter_bg": "#000000",
-    "editor_gutter_fg": "#636366",
+    "editor_bg": "#1f1f1f",
+    "editor_fg": "#d4d4d4",
+    "editor_line_highlight": "#2a2d2e",
+    "editor_selection": "#264f78",
+    "editor_gutter_bg": "#1f1f1f",
+    "editor_gutter_fg": "#858585",
 
     # Tabs
-    "tab_active_bg": "#000000",
+    "tab_active_bg": "#1f1f1f", # Blends with editor
     "tab_active_fg": "#ffffff",
-    "tab_active_border_top": "#ffffff", # Monochrome top line
-    "tab_inactive_bg": "#000000",
-    "tab_inactive_fg": "#aeaeb2",
-    "tab_bar_bg": "#000000",
+    "tab_active_border_top": "#007acc",
+    "tab_inactive_bg": "#181818", # Blends with sidebar
+    "tab_inactive_fg": "#8e8e8e",
+    "tab_bar_bg": "#181818",
 
     # Panel (terminal / output)
-    "panel_bg": "#000000",
-    "panel_fg": "#d1d1d6",
-    "panel_header_bg": "#000000",
-    "panel_border": "#3a3a3c",
+    "panel_bg": "#1f1f1f",
+    "panel_fg": "#d4d4d4",
+    "panel_header_bg": "#181818",
+    "panel_border": "#2b2b2b",
 
     # Status bar
-    "statusbar_bg": "#000000", # Pure Black
-    "statusbar_fg": "#ffffff",
-    "statusbar_hover_bg": "#1c1c1e",
+    "statusbar_bg": "#181818",
+    "statusbar_fg": "#cccccc",
+    "statusbar_hover_bg": "#2a2d2e",
 
     # Scrollbar
     "scrollbar_bg": "transparent",
-    "scrollbar_thumb": "#636366",
-    "scrollbar_thumb_hover": "#8e8e93",
+    "scrollbar_thumb": "#4e4e4e",
+    "scrollbar_thumb_hover": "#5e5e5e",
 
     # Terminal
-    "terminal_bg": "#000000",
-    "terminal_fg": "#d1d1d6",
-    "terminal_cursor": "#ffffff",
+    "terminal_bg": "#1f1f1f",
+    "terminal_fg": "#d4d4d4",
+    "terminal_cursor": "#d4d4d4",
 
     # Title bar
-    "titlebar_bg": "#000000",
-    "titlebar_fg": "#d1d1d6",
+    "titlebar_bg": "#181818", # Modern VS Code uses a cohesive title bar
+    "titlebar_fg": "#cccccc",
 
     # Input / Search
-    "input_bg": "#000000",
-    "input_fg": "#d1d1d6",
-    "input_border": "#3a3a3c",
-    "input_border_focus": "#ffffff", # White glow
+    "input_bg": "#2b2b2b",
+    "input_fg": "#cccccc",
+    "input_border": "#2b2b2b",
+    "input_border_focus": "#007acc",
 
     # Minimap
-    "minimap_bg": "#000000",
+    "minimap_bg": "#1f1f1f",
 
     # Breadcrumb
-    "breadcrumb_bg": "#000000",
-    "breadcrumb_fg": "#aeaeb2",
+    "breadcrumb_bg": "#1f1f1f",
+    "breadcrumb_fg": "#a9a9a9",
 
-    # Syntax colors — VS Code Dark+ exact palette (from official theme JSON)
-    "syntax_keyword": "#c586c0",    # PURPLE (keyword.control: if/for/while/return/import/from…)
-    "syntax_keyword2": "#569cd6",   # BLUE (storage: def/class, variable.language: self, constant.language: None/True/False)
-    "syntax_string": "#ce9178",     # orange-brown (strings)
-    "syntax_number": "#b5cea8",     # light green (numbers)
-    "syntax_comment": "#6a9955",    # green (comments)
-    "syntax_function": "#dcdcaa",   # yellow (entity.name.function)
-    "syntax_class": "#4ec9b0",      # teal (support.class / entity.name.type)
-    "syntax_variable": "#9cdcfe",   # light-blue (variable)
-    "syntax_operator": "#d4d4d4",   # light gray (keyword.operator)
-    "syntax_decorator": "#dcdcaa",  # yellow (decorators)
-    "syntax_builtin": "#4ec9b0",    # teal (built-in types)
-    "syntax_self": "#569cd6",       # blue (variable.language)
+    # Syntax colors — VS Code Modern palette
+    "syntax_keyword": "#c586c0",
+    "syntax_keyword2": "#569cd6",
+    "syntax_string": "#ce9178",
+    "syntax_number": "#b5cea8",
+    "syntax_comment": "#6a9955",
+    "syntax_function": "#dcdcaa",
+    "syntax_class": "#4ec9b0",
+    "syntax_variable": "#9cdcfe",
+    "syntax_operator": "#d4d4d4",
+    "syntax_decorator": "#dcdcaa",
+    "syntax_builtin": "#4ec9b0",
+    "syntax_self": "#569cd6",
 
-    # Problems panel (VS Code exact colors)
+    # Problems panel
     "problem_error": "#f14c4c",
     "problem_warning": "#cca700",
     "problem_info": "#3794ff",
@@ -121,7 +121,7 @@ DARK_THEME = {
     "problem_source_fg": "#858585",
     "problem_position_fg": "#858585",
 
-    # Git / Source Control (VS Code exact colors)
+    # Git
     "git_modified": "#e2c08d",
     "git_added": "#73c991",
     "git_deleted": "#c74e39",
@@ -347,13 +347,13 @@ def build_stylesheet(theme: dict) -> str:
         padding-top: 5px;
     }}
     QTreeView::item {{
-        padding: 4px;
+        padding: 2px 4px; /* VS Code density */
         border: none;
         border-radius: 0px; 
         margin: 0px; 
     }}
     QTreeView::item:hover {{
-        background-color: {theme['bg_hover']};
+        background-color: {theme['bg_active']}; /* Better contrast */
     }}
     QTreeView::item:selected {{
         background-color: {theme['bg_selection']};
@@ -399,14 +399,13 @@ def build_stylesheet(theme: dict) -> str:
 
     /* ===== SPLITTER ===== */
     QSplitter::handle {{
-        background-color: {theme['bg_darkest']};
-        border: 1px solid {theme['border']};
+        background-color: {theme['border']}; /* Subtle hairline separator */
     }}
     QSplitter::handle:horizontal {{
-        width: 6px;
+        width: 1px;
     }}
     QSplitter::handle:vertical {{
-        height: 6px;
+        height: 1px;
     }}
     QSplitter::handle:pressed {{
         background-color: {theme['accent']};
@@ -424,16 +423,17 @@ def build_stylesheet(theme: dict) -> str:
     QTabBar::tab {{
         background-color: {theme['tab_inactive_bg']};
         color: {theme['tab_inactive_fg']};
-        padding: 8px 16px;
+        padding: 6px 14px; /* Reduced padding */
         border: none;
         border-right: 1px solid {theme['border']};
-        min-width: 100px;
-        margin-right: 1px;
+        min-width: 80px;
+        height: 31px; /* VS Code official height */
+        font-size: 12px;
     }}
     QTabBar::tab:selected {{
         background-color: {theme['tab_active_bg']};
         color: {theme['tab_active_fg']};
-        border-top: 2px solid {theme['tab_active_border_top']};
+        border-top: 2px solid {theme['tab_active_border_top']}; /* Matches Modern VS Code benchmark */
     }}
     QTabBar::tab:hover:!selected {{
         background-color: {theme['bg_hover']};
